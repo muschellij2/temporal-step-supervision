@@ -1,0 +1,6 @@
+torch>=2.5
+numpy
+scipy
+pandas
+scikit-learn
+matplotlib
