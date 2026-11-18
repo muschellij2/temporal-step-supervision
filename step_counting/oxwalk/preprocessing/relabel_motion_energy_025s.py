@@ -126,6 +126,8 @@ def main():
         default=Path("data/oxwalk/OxWalk_Dec2022_peakvalley_025s"),
     )
     parser.add_argument("--radius_sec", type=float, default=0.25)
+    parser.add_argument("--only", nargs="*", default=None,
+                        help="only process these top-level sub-folders (e.g. Wrist_25Hz); default: all")
     args = parser.parse_args()
 
     if args.dst.exists():
@@ -135,6 +137,8 @@ def main():
     for dirpath, _, filenames in os.walk(args.src):
         src_dir = Path(dirpath)
         rel_dir = src_dir.relative_to(args.src)
+        if args.only and rel_dir.parts and rel_dir.parts[0] not in args.only:
+            continue
         dst_dir = args.dst / rel_dir
         dst_dir.mkdir(parents=True, exist_ok=True)
 
