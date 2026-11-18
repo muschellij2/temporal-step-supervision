@@ -149,3 +149,20 @@ If you use this code, please cite:
 Zhang, Y., Lago, P., Nguyen, Q.D. Temporal Step Supervision for Robust
 Step Counting from Wearable Accelerometers.
 ```
+
+## Predicting with the final models
+
+`runs/final_{clemson,oxwalk,combined}` hold the final weights. `step_counting/inference.py`
+wraps them so you only supply wrist accelerometer data (x,y,z in g) at any sampling rate;
+resampling (15 Hz for clemson/combined, 25 Hz for oxwalk), gravity removal, the saved raster
+ranges and 60 s windowing are applied automatically.
+
+```python
+from step_counting.inference import StepCounter
+res = StepCounter("combined").predict(xyz, fs=30.0)   # xyz: (N,3) array
+res.step_count, res.step_times_s, res.prob
+```
+```bash
+python scripts/predict.py recording.csv --model combined --fs 30 --out preds.csv
+```
+Axis/orientation conventions are not corrected, so wrist placement should resemble the training data.

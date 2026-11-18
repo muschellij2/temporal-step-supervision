@@ -24,6 +24,8 @@ class AdaptiveHybridLoss(nn.Module):
         self.eps = float(eps)
         self.count_mode = count_mode
         self.verbose = verbose
+        # Per-batch components of the most recent forward(), for logging.
+        self.last_components = {}
 
     def _get_alpha(self, epoch, total_epochs):
         """Ramp the count-loss weight after the warmup stage."""
@@ -93,6 +95,11 @@ class AdaptiveHybridLoss(nn.Module):
 
         alpha = self._get_alpha(epoch, total_epochs)
         loss = (1.0 - alpha) * seq_loss + alpha * subject_rel_mse
+        self.last_components = {
+            "alpha": float(alpha),
+            "bce": float(seq_loss.detach()),
+            "count_mse": float(subject_rel_mse.detach()),
+        }
 
         if self.verbose and (epoch % 10 == 0):
             print(

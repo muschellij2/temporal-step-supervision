@@ -1,0 +1,176 @@
+using env python directly: /users/jmuschel/.conda/envs/tss (skipping conda activate)
+conda env: tss | python: /users/jmuschel/.conda/envs/tss/bin/python
+LD_LIBRARY_PATH entries containing .local (removed): 
+torch 2.11.0+cu128 from /users/jmuschel/.conda/envs/tss/lib/python3.11/site-packages/torch/__init__.py
+cuda available: True
+GPU: NVIDIA L40S (CC 8.9) | torch built for: ['sm_75', 'sm_80', 'sm_86', 'sm_90', 'sm_100', 'sm_120']
+cudnn: 91900
+GPU 0: NVIDIA L40S (UUID: GPU-37f59eb3-b40e-27d6-67f3-e068a970556f)
+Deterministic mode enabled (seed=42)
+Loading OxWalk CSV (x,y,z,annotation) -> 3-axis preprocess=none bandpass=0.3-4.0Hz
+Loaded P01_wrist25.csv | subject=P01 | len=90000 | steps=867
+Loaded P02_wrist25.csv | subject=P02 | len=90001 | steps=477
+Loaded P03_wrist25.csv | subject=P03 | len=90000 | steps=4144
+Loaded P04_wrist25.csv | subject=P04 | len=90000 | steps=213
+Loaded P05_wrist25.csv | subject=P05 | len=90000 | steps=528
+Loaded P06_wrist25.csv | subject=P06 | len=90000 | steps=441
+Loaded P07_wrist25.csv | subject=P07 | len=90000 | steps=2368
+Loaded P08_wrist25.csv | subject=P08 | len=90000 | steps=382
+Loaded P09_wrist25.csv | subject=P09 | len=90001 | steps=431
+Loaded P10_wrist25.csv | subject=P10 | len=90000 | steps=282
+Loaded P11_wrist25.csv | subject=P11 | len=90000 | steps=3956
+Loaded P12_wrist25.csv | subject=P12 | len=84213 | steps=4154
+Loaded P13_wrist25.csv | subject=P13 | len=58500 | steps=4064
+Loaded P14_wrist25.csv | subject=P14 | len=90000 | steps=2668
+Loaded P15_wrist25.csv | subject=P15 | len=90000 | steps=1419
+Loaded P16_wrist25.csv | subject=P16 | len=90000 | steps=1851
+Loaded P17_wrist25.csv | subject=P17 | len=90000 | steps=1908
+Loaded P18_wrist25.csv | subject=P18 | len=90000 | steps=217
+Loaded P19_wrist25.csv | subject=P19 | len=90000 | steps=726
+Loaded P20_wrist25.csv | subject=P20 | len=90000 | steps=194
+Loaded P21_wrist25.csv | subject=P21 | len=90000 | steps=1177
+Loaded P22_wrist25.csv | subject=P22 | len=90000 | steps=1443
+Loaded P23_wrist25.csv | subject=P23 | len=90000 | steps=308
+Loaded P24_wrist25.csv | subject=P24 | len=90000 | steps=5521
+Loaded P25_wrist25.csv | subject=P25 | len=90000 | steps=259
+Loaded P26_wrist25.csv | subject=P26 | len=90000 | steps=1672
+Loaded P27_wrist25.csv | subject=P27 | len=90000 | steps=324
+Loaded P28_wrist25.csv | subject=P28 | len=90000 | steps=258
+Loaded P29_wrist25.csv | subject=P29 | len=90000 | steps=556
+Loaded P30_wrist25.csv | subject=P30 | len=90000 | steps=5939
+Loaded P31_wrist25.csv | subject=P31 | len=90000 | steps=1044
+Loaded P32_wrist25.csv | subject=P32 | len=90000 | steps=1820
+Loaded P33_wrist25.csv | subject=P33 | len=90000 | steps=4813
+Loaded P34_wrist25.csv | subject=P34 | len=90000 | steps=94
+Loaded P35_wrist25.csv | subject=P35 | len=90000 | steps=1884
+Loaded P36_wrist25.csv | subject=P36 | len=90000 | steps=293
+Loaded P37_wrist25.csv | subject=P37 | len=27000 | steps=248
+Loaded P38_wrist25.csv | subject=P38 | len=90000 | steps=3356
+Loaded P39_wrist25.csv | subject=P39 | len=90000 | steps=605
+Loaded 39 recordings from 39 subjects.
+Fold per-axis BIN ranges (p0.5~p99.5):
+  axis0: [-1.266804, 1.058615]
+  axis1: [-1.529544, 1.198613]
+  axis2: [-0.935669, 1.067043]
+Windows=2276 X=(2276, 16, 1500, 3) subjects=39 params=1,856,545
+Epoch001: Train=0.628332
+Epoch002: Train=0.541629
+Epoch003: Train=0.494167
+Epoch004: Train=0.454928
+Epoch005: Train=0.417442
+Epoch006: Train=0.385052
+Epoch007: Train=0.363026
+Epoch008: Train=0.334656
+Epoch009: Train=0.315133
+Epoch010: Train=0.296756
+Epoch011: Train=0.287489
+Epoch012: Train=0.272828
+Epoch013: Train=0.254734
+Epoch014: Train=0.251655
+Epoch015: Train=0.240384
+Epoch016: Train=0.242680
+Epoch017: Train=0.229030
+Epoch018: Train=0.222020
+Epoch019: Train=0.229318
+Epoch020: Train=0.218633
+Epoch021: Train=0.218869
+Epoch022: Train=0.215966
+Epoch023: Train=0.212336
+Epoch024: Train=0.211647
+Epoch025: Train=0.206568
+Epoch026: Train=0.197981
+Epoch027: Train=0.207561
+Epoch028: Train=0.200206
+Epoch029: Train=0.197368
+Epoch030: Train=0.197476
+Epoch031: Train=0.190322
+Epoch032: Train=0.383747
+Epoch033: Train=0.414650
+Epoch034: Train=0.351624
+Epoch035: Train=0.412901
+Epoch036: Train=0.395169
+Epoch037: Train=0.458765
+Epoch038: Train=0.545844
+Epoch039: Train=0.442898
+Epoch040: Train=0.495774
+Epoch041: Train=0.563518
+Epoch042: Train=0.471399
+Epoch043: Train=0.520068
+Epoch044: Train=0.526918
+Epoch045: Train=0.518585
+Epoch046: Train=0.538914
+Epoch047: Train=0.520347
+Epoch048: Train=0.683669
+Epoch049: Train=0.568992
+Epoch050: Train=0.603921
+Epoch051: Train=0.596615
+Epoch052: Train=0.725298
+Epoch053: Train=0.469988
+Epoch054: Train=0.538369
+Epoch055: Train=0.596048
+Epoch056: Train=0.555517
+Epoch057: Train=0.479156
+Epoch058: Train=0.532842
+Epoch059: Train=0.512441
+Epoch060: Train=0.560195
+Epoch061: Train=0.529544
+Epoch062: Train=0.530910
+Epoch063: Train=0.539952
+Epoch064: Train=0.488713
+Epoch065: Train=0.562467
+Epoch066: Train=0.607567
+Epoch067: Train=0.511822
+Epoch068: Train=0.609026
+Epoch069: Train=0.520721
+Epoch070: Train=0.471646
+Epoch071: Train=0.461405
+Epoch072: Train=0.432922
+Epoch073: Train=0.514866
+Epoch074: Train=0.473146
+Epoch075: Train=0.465224
+Epoch076: Train=0.458931
+Epoch077: Train=0.481043
+Epoch078: Train=0.447049
+Epoch079: Train=0.635554
+Epoch080: Train=0.444339
+Epoch081: Train=0.457829
+Epoch082: Train=0.443282
+Epoch083: Train=0.428126
+Epoch084: Train=0.405275
+Epoch085: Train=0.422336
+Epoch086: Train=0.402477
+Epoch087: Train=0.379275
+Epoch088: Train=0.401504
+Epoch089: Train=0.390438
+Epoch090: Train=0.367950
+Epoch091: Train=0.382242
+Epoch092: Train=0.358474
+Epoch093: Train=0.401917
+Epoch094: Train=0.385014
+Epoch095: Train=0.373205
+Epoch096: Train=0.448386
+Epoch097: Train=0.325255
+Epoch098: Train=0.367716
+Epoch099: Train=0.341908
+Epoch100: Train=0.336218
+Epoch101: Train=0.338863
+Epoch102: Train=0.340434
+Epoch103: Train=0.355166
+Epoch104: Train=0.320629
+Epoch105: Train=0.352699
+Epoch106: Train=0.318471
+Epoch107: Train=0.326488
+Epoch108: Train=0.343287
+Epoch109: Train=0.310734
+Epoch110: Train=0.314386
+Epoch111: Train=0.316413
+Epoch112: Train=0.315643
+Epoch113: Train=0.334307
+Epoch114: Train=0.302620
+Epoch115: Train=0.313289
+Epoch116: Train=0.314333
+Epoch117: Train=0.314568
+Epoch118: Train=0.390406
+Epoch119: Train=0.282578
+Epoch120: Train=0.293682
+Saved runs/final_oxwalk/model.pt

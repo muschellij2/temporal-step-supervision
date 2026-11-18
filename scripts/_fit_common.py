@@ -51,10 +51,11 @@ def fit(model, X, y, c, subj_ids, criterion, device, out, epochs=EPOCHS, num_wor
 
     opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=WD)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(1, epochs), eta_min=ETA_MIN)
-    losses = []
+    losses, comps = [], []
     for epoch in range(epochs):
         model.train()
         total = 0.0
+        csum = {}
         for xb, yb, cb, sb in loader:
             xb, yb, cb, sb = xb.to(device, non_blocking=True), yb.to(device), cb.to(device), sb.to(device)
             opt.zero_grad()
@@ -63,9 +64,17 @@ def fit(model, X, y, c, subj_ids, criterion, device, out, epochs=EPOCHS, num_wor
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
             total += float(loss.item())
+            for k, v in getattr(criterion, "last_components", {}).items():
+                csum[k] = csum.get(k, 0.0) + v
         sched.step()
         losses.append(total / max(1, len(loader)))
-        print(f"Epoch{epoch + 1:03d}: Train={losses[-1]:.6f}", flush=True)
-        pd.DataFrame({"epoch": range(1, len(losses) + 1), "train_loss": losses}).to_csv(out / "loss_log.csv", index=False)
+        comps.append({k: v / max(1, len(loader)) for k, v in csum.items()})
+        c = comps[-1]
+        extra = (f" | alpha={c['alpha']:.4f} bce={c['bce']:.6f} count_mse={c['count_mse']:.6f}" if c else "")
+        print(f"Epoch{epoch + 1:03d}: Train={losses[-1]:.6f}{extra}", flush=True)
+        log = pd.DataFrame({"epoch": range(1, len(losses) + 1), "train_loss": losses})
+        for k in (comps[0] if comps and comps[0] else {}):
+            log[k] = [r[k] for r in comps]
+        log.to_csv(out / "loss_log.csv", index=False)
     torch.save(model.state_dict(), out / "model.pt")
     print(f"Saved {out / 'model.pt'}")

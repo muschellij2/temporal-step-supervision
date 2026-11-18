@@ -28,6 +28,8 @@ class AdaptiveHybridLoss(nn.Module):
         self.chunk_count_weight = float(chunk_count_weight)
         self.zero_chunk_fp_weight = float(zero_chunk_fp_weight)
         self.verbose = verbose
+        # Per-batch components of the most recent forward(), for logging.
+        self.last_components = {}
 
     def _get_alpha(self, epoch, total_epochs):
         """Ramp the count-loss weight after the warmup stage."""
@@ -103,6 +105,11 @@ class AdaptiveHybridLoss(nn.Module):
 
         alpha = self._get_alpha(epoch, total_epochs)
         loss = (1.0 - alpha) * seq_loss + alpha * subject_rel_mse
+        self.last_components = {
+            "alpha": float(alpha),
+            "bce": float(seq_loss.detach()),
+            "count_mse": float(subject_rel_mse.detach()),
+        }
 
         chunk_loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
         fp_loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)

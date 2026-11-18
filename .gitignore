@@ -5,3 +5,4 @@ runs/
 *.pt
 .DS_Store
 pubs/
+analysis/cache/

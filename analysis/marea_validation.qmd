@@ -1,0 +1,647 @@
+---
+title: "External validation of the final step-counting models on MAREA"
+subtitle: "Do our fitted models behave like the paper's, and did we fit them the way the paper did?"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    embed-resources: true
+    fig-width: 8
+    fig-height: 4.5
+jupyter: python3
+execute:
+  warning: false
+---
+
+```{python}
+#| label: setup
+import json, sys
+from pathlib import Path
+import numpy as np, pandas as pd
+import matplotlib.pyplot as plt
+
+ROOT = Path.cwd()
+while not (ROOT / "step_counting").exists():
+    ROOT = ROOT.parent
+sys.path.insert(0, str(ROOT))
+CACHE = ROOT / "analysis" / "cache"
+if not (CACHE / "marea_counts.csv").exists():
+    raise SystemExit("Run `python analysis/marea_eval.py` first (computes the caches, ~15 min on CPU).")
+
+plt.rcParams.update({"figure.dpi": 110, "axes.spines.top": False, "axes.spines.right": False,
+                     "axes.grid": True, "grid.alpha": .25, "legend.frameon": False})
+MODELS = ["clemson", "combined", "oxwalk"]
+COL = {"clemson": "#1b6ca8", "combined": "#2a9d8f", "oxwalk": "#d1495b"}
+ACTS = ["treadmill_walk", "treadmill_slopewalk", "indoor_walk", "outdoor_walk",
+        "treadmill_run", "indoor_run", "outdoor_run"]
+RNG = np.random.default_rng(0)
+
+d = pd.read_csv(CACHE / "marea_counts.csv")
+d["kind"] = np.where(d.activity.str.contains("run"), "run", "walk")
+d["pe"] = (d.mass - d.true) / d.true * 100          # percentage error  (paper: PE)
+d["ape"] = d.pe.abs()                                # absolute percentage error (paper: APE)
+d["spm"] = d.true / (d.duration_s / 60)              # true steps / min
+probs = np.load(CACHE / "marea_probs.npz")
+dist = json.loads((CACHE / "distributions.json").read_text())
+
+def boot(g, n=2000):
+    """Paper-style metric: MAPE/MPE over evaluation units, 95% bootstrap CI resampling *participants*
+    (all of a participant's recordings kept together)."""
+    subs = g.subject.unique()
+    by = {s: g[g.subject == s] for s in subs}
+    mape, mpe = [], []
+    for _ in range(n):
+        b = pd.concat([by[s] for s in RNG.choice(subs, len(subs))])
+        mape.append(b.ape.mean()); mpe.append(b.pe.mean())
+    f = lambda a: (np.mean(a), *np.percentile(a, [2.5, 97.5]))
+    return dict(MAPE=g.ape.mean(), MAPE_lo=np.percentile(mape, 2.5), MAPE_hi=np.percentile(mape, 97.5),
+                MPE=g.pe.mean(), MPE_lo=np.percentile(mpe, 2.5), MPE_hi=np.percentile(mpe, 97.5),
+                n=len(g), pooled_bias=(g.mass.sum() - g.true.sum()) / g.true.sum() * 100)
+
+def table(by):
+    rows = []
+    for k, g in d.groupby(by):
+        r = boot(g); r.update(dict(zip(by, k if isinstance(k, tuple) else (k,)))); rows.append(r)
+    return pd.DataFrame(rows)
+
+def fmt(r, m="MAPE"):
+    return f"{r[m]:.1f} [{r[m+'_lo']:.1f}, {r[m+'_hi']:.1f}]"
+```
+
+# Summary
+
+**Question.** Models fitted with `scripts/fit_final_*.py` (`clemson`, `oxwalk`, and a pooled `combined`
+model) were evaluated on **MAREA** (Khandelwal & Wickström), an external dataset none of them saw:
+wrist accelerometer at 128 Hz, with heel strikes from shoe pressure sensors as the step reference
+(19 participants, 68 recordings, 41,367 steps). We asked (1) whether the models behave in line with
+the published results (Zhang, Lago & Nguyen, *Sensors* 2026, "Temporal Step Supervision") and
+(2) whether anything about *how we fit them* departs from the paper's protocol.
+
+```{python}
+#| label: summary-numbers
+walk = d[d.kind == "walk"]; run = d[d.kind == "run"]
+sw = {m: boot(walk[walk.model == m], 1000) for m in MODELS}
+sr = {m: boot(run[run.model == m], 1000) for m in MODELS}
+from IPython.display import Markdown
+Markdown("\n".join([
+ "| model | walking MAPE % | walking MPE % | running MAPE % | running MPE % |", "|---|---|---|---|---|"] +
+ [f"| {m} | {fmt(sw[m])} | {fmt(sw[m],'MPE')} | {fmt(sr[m])} | {fmt(sr[m],'MPE')} |" for m in MODELS]) +
+ "\n\n*Participant-bootstrap 95% CI in brackets. Units are participant × activity recordings (paper convention). "
+ "MPE < 0 means undercounting.*")
+```
+
+**Findings, in short** (each is demonstrated below):
+
+1. **Walking: in line with the paper's cross-dataset results.** Per-recording MAPE is 8–13 %
+   (combined 8 %, clemson 12 %, oxwalk 13 %), at or below the paper's zero-shot range
+   (13–29 % MAPE; Section 6). `clemson` and `combined` undercount (MPE −12 % and −8 %);
+   `oxwalk` is unbiased on average (−0.5 %) but with ±13 % scatter per recording. This is
+   somewhat worse than the paper's in-domain (held-out) numbers, as expected for an unseen
+   sensor and protocol.
+2. **Against the open-source algorithms on MAREA** (Koffman et al.), our models' walking count
+   error is comparable to stepcount SSL/RF and better than Oak, ActiLife, ADEPT and Verisense
+   (Section 6.2); SSL's published speed analysis suggests it handles running better than ours do.
+3. **Running: the models fail, and they were never asked to run.** Neither paper dataset contains
+   running: ~98 % of annotated training steps are below 140 steps/min, while ~79 % of MAREA running
+   steps are above it, and running wrist amplitude is ~5–9× the walking amplitude the raster was
+   calibrated to (Section 4). This is a domain-coverage limit, not evidence of a broken fit.
+   A diagnostic (Section 7) gives only partial support to the cadence explanation (making running
+   look 25 % slower halves the undercount) and **no support** for the amplitude-clipping explanation
+   (shrinking the signal made things worse), so the cause is not fully pinned down.
+4. **Our final fits reproduce the paper's recipe in the ways that matter** (optimiser, schedule,
+   loss, label widths, preprocessing, raster ranges), with three real differences that need to be
+   known: no held-out split / no validation-based checkpoint selection for the OxWalk model,
+   all participants used for training (so there is no in-fit generalisation estimate), and a
+   documentation inconsistency in the paper's early-stopping description (Section 8).
+5. **None of these differences is large enough to explain the walking undercount or the running
+   failure.** The one fitting-related choice with a plausible, testable effect on the *final*
+   model is the late-training count-loss weighting (Section 2), and it is worth a held-out
+   ablation rather than a guess.
+
+# 1. Data and models
+
+```{python}
+man = pd.read_csv(ROOT / "data/marea/manifest.csv")
+t = (man.groupby("activity").agg(recordings=("file", "size"), participants=("subject", "nunique"),
+        hours=("duration_s", lambda s: s.sum() / 3600), steps=("n_steps", "sum"),
+        median_steps_per_min=("steps_per_min", "median")).loc[ACTS].round(2))
+t
+```
+
+| | `clemson` | `combined` | `oxwalk` |
+|---|---|---|---|
+| training data | Clemson wrist (30 people) | Clemson + OxWalk wrist, 15 Hz (69 people) | OxWalk wrist (39 people) |
+| model rate / window | 15 Hz / 60 s (T=900) | 15 Hz / 60 s | 25 Hz / 60 s (T=1500) |
+| input | gravity-removed raster | gravity-removed raster | unprocessed raster |
+| label width | 5 | 5 | 7 |
+| in the paper? | yes (Clemson main model) | **no** (our addition) | yes (OxWalk main model) |
+
+Inputs at inference are put on the model's footing by `step_counting/inference.py`: polyphase
+resampling to the model rate, the model's own preprocessing, the saved training raster ranges,
+60 s windows, and mass counting `Σp / label_width`. MAREA's wrist is 128 Hz in g, so every model
+sees a resampled signal (128 → 15 or 25 Hz).
+
+**Step definition.** MAREA gives heel strikes (left + right, one step each) from foot pressure
+sensors. Clemson and OxWalk use video-annotated steps. These should agree on counts, but not on
+exact timing (Section 6).
+
+# 2. Fit health: training loss
+
+The training logs only have the *total* loss, so the curves below are the hybrid loss
+$(1-\alpha)\,\text{BCE} + \alpha\,\text{count-MSE}$ together with the count weight $\alpha$.
+
+```{python}
+#| label: fig-loss
+#| fig-cap: "Training loss of the three final fits. The jump at epoch 32 coincides with the count term switching on (α>0), not with overfitting."
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+for m in MODELS:
+    ll = pd.read_csv(ROOT / f"runs/final_{m}/loss_log.csv")
+    ax.plot(ll.epoch, ll.train_loss, color=COL[m], label=m)
+ep = np.arange(1, 121)
+alpha = np.clip((ep - 1 - 30) / 50, 0, 1) * 0.15
+ax2 = ax.twinx(); ax2.plot(ep, alpha, "k--", lw=1, label="α (count weight)"); ax2.set_ylabel("α"); ax2.grid(False)
+ax.axvline(31, color="gray", lw=.8); ax.set_xlabel("epoch"); ax.set_ylabel("train loss (hybrid)")
+ax.legend(loc="upper left"); ax2.legend(loc="upper right")
+plt.show()
+```
+
+* Epochs 1–31 (α = 0): pure BCE, smooth and converged (0.19 oxwalk, 0.26 clemson/combined).
+* Epoch 32: α first becomes non-zero (0.003) and the loss roughly doubles. The count term is
+  unbounded (squared error of a *subject-level* count over `true+1`), so even a tiny α dominates;
+  the logged value is on a different scale after this point. This is by design in the paper's
+  loss (their Eq. for $L_{count}$, α schedule $E_{warmup}=30$, $E_{ramp}=50$, $α_{max}=0.15$).
+* By epoch 120 the loss is flat (cosine LR near 1e-5). **Epoch count is not a problem**; more
+  epochs would not change the model materially. Both runs are noisy late in training
+  (oxwalk 0.28–0.39 in the last ten epochs), which matters for "final-epoch weights" (Section 8).
+
+# 3. Do the predictions agree with the reference?
+
+## 3.1 Counts
+
+```{python}
+#| label: fig-scatter
+#| fig-cap: "Predicted vs true steps per recording. Walking sits close to the identity line, slightly below it; running falls far below, worst for oxwalk."
+fig, axs = plt.subplots(1, 3, figsize=(11, 3.9), sharex=True, sharey=True)
+mk = {"walk": "o", "run": "^"}
+for ax, m in zip(axs, MODELS):
+    g = d[d.model == m]
+    for k, gg in g.groupby("kind"):
+        ax.scatter(gg.true, gg.mass, s=16, marker=mk[k], color=COL[m], alpha=.7, label=k)
+    lim = [0, d.true.max() * 1.05]; ax.plot(lim, lim, "k-", lw=.8); ax.plot(lim, [x * .9 for x in lim], "k:", lw=.6)
+    ax.set_title(m); ax.set_xlabel("true steps (heel strikes)")
+axs[0].set_ylabel("predicted steps (mass)"); axs[0].legend(); plt.tight_layout(); plt.show()
+```
+
+```{python}
+#| label: fig-bias
+#| fig-cap: "Mean percentage error (MPE) by activity with participant-bootstrap 95% CI. Negative = undercount."
+tb = table(["model", "activity"])
+fig, ax = plt.subplots(figsize=(9, 4))
+for i, m in enumerate(MODELS):
+    r = tb[tb.model == m].set_index("activity").loc[ACTS]
+    x = np.arange(len(ACTS)) + (i - 1) * .25
+    ax.errorbar(x, r.MPE, yerr=[r.MPE - r.MPE_lo, r.MPE_hi - r.MPE], fmt="o", color=COL[m], label=m, capsize=3)
+ax.axhline(0, color="k", lw=.8); ax.axvline(3.5, color="gray", ls="--", lw=.8)
+ax.set_xticks(range(len(ACTS))); ax.set_xticklabels([a.replace("_", "\n") for a in ACTS], fontsize=8)
+ax.set_ylabel("MPE (%)"); ax.legend(); plt.show()
+```
+
+```{python}
+#| label: tbl-counts
+out = tb.assign(MAPE_ci=tb.apply(fmt, axis=1), MPE_ci=tb.apply(lambda r: fmt(r, "MPE"), axis=1))
+out = out.pivot(index="activity", columns="model", values=["MAPE_ci", "MPE_ci"]).loc[ACTS]
+out
+```
+
+* **Walking** (four rows): per-recording MAPE is 8.4 % (`combined`), 12.1 % (`clemson`) and
+  13.2 % (`oxwalk`); mean error is −7.9 %, −11.8 % and −0.5 %. `oxwalk` is nearly unbiased overall
+  only because over- and under-counts cancel (its MAPE is still 13 %); `clemson` is the most
+  consistently low. `combined` has the lowest walking error, but the intervals overlap, so the
+  ordering is suggestive only.
+* **Running** (three rows): large undercounts for all (MPE −26 % `clemson`, −44 % `combined`,
+  −83 % `oxwalk`). The model that trained on the most data is not the best here.
+
+## 3.2 Does the error depend on cadence?
+
+```{python}
+#| label: fig-cadence-err
+#| fig-cap: "Percentage error vs true cadence (steps/min). Error is near zero below ~110 steps/min (few recordings), drifts negative from ~120, and is strongly negative above ~130–140; running recordings (triangles) are the high-cadence tail."
+fig, axs = plt.subplots(1, 3, figsize=(11, 3.7), sharey=True)
+for ax, m in zip(axs, MODELS):
+    g = d[d.model == m]
+    for k, gg in g.groupby("kind"):
+        ax.scatter(gg.spm, gg.pe, s=16, marker=mk[k], color=COL[m], alpha=.7)
+    ax.axhline(0, color="k", lw=.8); ax.axvline(140, color="gray", ls=":", lw=.8)
+    ax.set_title(m); ax.set_xlabel("true steps / min")
+axs[0].set_ylabel("percentage error (%)"); plt.tight_layout(); plt.show()
+cc = d.groupby("model").apply(lambda g: pd.Series({"r (cadence, PE)": np.corrcoef(g.spm, g.pe)[0, 1],
+        "r (walk only)": np.corrcoef(g[g.kind=='walk'].spm, g[g.kind=='walk'].pe)[0, 1]})).round(2); cc
+```
+
+# 4. Why: how MAREA differs from the training data
+
+## 4.1 Cadence
+
+```{python}
+#| label: fig-cadence-hist
+#| fig-cap: "Instantaneous cadence (60 / inter-step interval) of annotated steps. The paper's training datasets (shaded) barely contain cadences above ~140 steps/min; MAREA running is almost entirely above."
+fig, ax = plt.subplots(figsize=(8, 3.8))
+bins = np.arange(40, 230, 4)
+for k, c, ls in [("clemson", "#1b6ca8", "-"), ("oxwalk", "#d1495b", "-"), ("marea_walk", "#444", "--"), ("marea_run", "#e9a100", "--")]:
+    v = np.asarray(dist["cadence"][k]); ax.hist(v, bins, density=True, histtype="step", lw=1.8, color=c, ls=ls,
+                                               label=f"{k}  (>{140}: {np.mean(v > 140)*100:.0f}%)")
+ax.axvline(140, color="gray", ls=":"); ax.set_xlabel("steps / min"); ax.set_ylabel("density"); ax.legend(); plt.show()
+```
+
+## 4.2 Signal amplitude and the raster range
+
+The raster input clips each axis to a **fixed training range** (`bin_ranges.csv`, the 0.5/99.5
+percentiles of the training signal) before quantising to 16 bins. Anything outside is clipped flat.
+
+```{python}
+#| label: fig-amp
+#| fig-cap: "Gravity-removed amplitude: standard deviation per axis. MAREA walking is ~1.3× Clemson; MAREA running is ~5–9×. The raster range the clemson/combined models use is only about ±0.5 g."
+ax_names = ["x", "y", "z"]
+fig, ax = plt.subplots(figsize=(8, 3.6))
+w = .2
+for i, k in enumerate(["clemson", "oxwalk", "marea_walk", "marea_run"]):
+    ax.bar(np.arange(3) + (i - 1.5) * w, dist["axes"][k]["grav_removed_std"], w, label=k)
+ax.set_xticks(range(3)); ax.set_xticklabels(ax_names); ax.set_ylabel("std of gravity-removed acc (g, at 15 Hz)"); ax.legend(); plt.show()
+br = {m: pd.read_csv(ROOT / f"runs/final_{m}/bin_ranges.csv") for m in MODELS}
+pd.DataFrame({"model range (vmin..vmax, g)": {m: " | ".join(f"[{r.vmin:.2f}, {r.vmax:.2f}]" for r in br[m].itertuples()) for m in MODELS},
+              "MAREA-run 0.5–99.5 pct (gravity-removed)": {m: " | ".join(f"[{a:.1f}, {b:.1f}]" for a, b in zip(dist['axes']['marea_run']['grav_removed_p005'], dist['axes']['marea_run']['grav_removed_p995'])) for m in ["clemson", "combined"]}})
+```
+
+For `clemson`/`combined` (gravity removed, range about ±0.5 g) a running signal of ±3 g lies far
+outside the raster range, so one would expect clipping on most strides. `oxwalk` uses unprocessed
+acceleration with a wider range (about ±1.3 g), but running (±4 g raw) is also outside it.
+This is a **hypothesis**: Section 7 tests it directly and it is *not* supported.
+
+## 4.3 Orientation (affects `oxwalk` most)
+
+```{python}
+#| label: orientation
+pd.DataFrame({k: dict(zip(["mean x", "mean y", "mean z"], np.round(v["raw_mean"], 2))) | dict(zip(["std x", "std y", "std z"], np.round(v["raw_std"], 2)))
+              for k, v in dist["axes"].items()}).T
+```
+
+The mean of the *raw* signal is the gravity direction. It differs between datasets (the gravity-
+bearing axis is *y* in Clemson, mixed in OxWalk, and *y* with a large spread in MAREA walking),
+so the wrist/sensor axes are **not** harmonised across cohorts. `clemson`/`combined` are protected
+because gravity is subtracted before rasterisation; `oxwalk` takes the raw signal and so inherits
+any orientation difference. MAREA walking works acceptably for `oxwalk` anyway, so orientation is a
+risk to monitor rather than a demonstrated cause here.
+
+# 5. Where in time do the models place steps?
+
+```{python}
+#| label: fig-traces
+#| fig-cap: "Step probability (line) vs reference heel strikes (ticks) for one walking and one running recording; combined model, 25 s excerpt."
+ev = pd.read_csv(ROOT / "data/marea/events.csv")
+def pick(act, m="combined"):
+    g = d[(d.model == m) & (d.activity == act)]
+    return int(g.iloc[(g.pe - g.pe.median()).abs().argmin()].subject)
+fig, axs = plt.subplots(2, 3, figsize=(12, 4.6), sharex=True, sharey=True)
+for i, act in enumerate(["treadmill_walk", "treadmill_run"]):
+    s = pick(act)
+    et = ev[(ev.activity == act) & (ev.subject == s)].time_s.to_numpy()
+    for j, m in enumerate(MODELS):
+        p = probs[f"{m}|{act}|{s}"]; fs = int(d[d.model == m].model_fs.iloc[0]); t = np.arange(len(p)) / fs
+        a = axs[i, j]; a.plot(t, p, color=COL[m], lw=1)
+        a.vlines(et, -.08, -.02, color="k", lw=.8); a.axhline(.5, color="gray", ls=":", lw=.8)
+        a.set_xlim(40, 65); a.set_ylim(-.1, 1.05); a.set_title(f"{m}  –  {act}  (S{s:02d})", fontsize=9)
+axs[1, 1].set_xlabel("time (s)"); plt.tight_layout(); plt.show()
+```
+
+```{python}
+#| label: fig-f1
+#| fig-cap: "Event-level agreement with heel strikes (±0.25 s tolerance), and mean peak probability at true steps."
+d["prec"] = d.tp / (d.tp + d.fp).clip(lower=1); d["rec"] = d.tp / (d.tp + d.fn).clip(lower=1)
+d["f1"] = 2 * d.prec * d.rec / (d.prec + d.rec).clip(lower=1e-9)
+fig, axs = plt.subplots(1, 3, figsize=(12, 3.6))
+for ax, (col, lab) in zip(axs, [("f1", "event F1"), ("peak_prob", "mean peak prob. at true step"), ("median_offset_s", "median offset (s)")]):
+    for i, m in enumerate(MODELS):
+        r = d[d.model == m].groupby("activity")[col].mean().loc[ACTS]
+        ax.bar(np.arange(len(ACTS)) + (i - 1) * .27, r, .27, color=COL[m], label=m)
+    ax.set_xticks(range(len(ACTS))); ax.set_xticklabels([a.replace("_", "\n") for a in ACTS], fontsize=7); ax.set_title(lab, fontsize=10)
+axs[0].legend(); plt.tight_layout(); plt.show()
+d.groupby(["model", "kind"])[["prec", "rec", "f1", "peak_prob", "median_offset_s"]].mean().round(3)
+```
+
+* **Walking:** among heel strikes, 60–72 % are matched by a predicted step event within ±0.25 s
+  (recall) and ~89–90 % of predicted events match a heel strike (precision). The mean peak
+  probability at a true step is 0.73–0.75, so most steps do raise the probability well above 0.5.
+  We have not established *why* event recall is lower than the peak probabilities suggest
+  (merged runs and threshold effects are candidates).
+* **Running:** event precision/recall collapse (≤0.08 / ≤0.01) because above-threshold regions
+  merge across strides; mean peak probability at a true step is lower (0.40 `oxwalk`, 0.56–0.60
+  others). Mass counts are also low, so the model is under-confident, not just merging.
+* **Timing:** among matched events the median offset from heel strike is small
+  (|offset| ≤ 0.04 s), so there is no large systematic timing shift. Training labels are
+  video-annotated steps (realigned for OxWalk), not foot-pressure heel strikes, so some small
+  offset is expected.
+
+# 6. Comparison with published results
+
+The paper reports **held-out** results on its own datasets, and zero-shot transfer between them.
+MAREA is a third dataset, so the fair comparison for our walking results is the paper's
+*zero-shot* tables, not its in-domain tables. The paper has no running data.
+
+```{python}
+#| label: tbl-paper
+paper = pd.DataFrame([
+ ["In-domain, held-out", "Clemson wrist, regular",      4.61,  -2.33],
+ ["In-domain, held-out", "Clemson wrist, semi-regular",  9.90,  -5.28],
+ ["In-domain, held-out", "Clemson wrist, irregular",    15.78,   2.87],
+ ["In-domain, held-out", "OxWalk wrist (free-living)",  13.06,  -2.78],
+ ["Zero-shot OxWalk→Clemson", "regular",               12.97,  -7.84],
+ ["Zero-shot OxWalk→Clemson", "semi-regular",          13.04,  -8.68],
+ ["Zero-shot OxWalk→Clemson", "irregular",             16.56,  -1.11],
+ ["Zero-shot Clemson→OxWalk", "OxWalk (participants)", 28.75,  10.89],
+], columns=["setting", "data", "paper MAPE %", "paper MPE %"])
+mw = pd.DataFrame({m: dict(zip(["ours MAPE %", "ours MPE %"], [round(sw[m]["MAPE"], 1), round(sw[m]["MPE"], 1)])) for m in MODELS}).T
+display(paper)
+print("Ours on MAREA walking (all four walking activities pooled):")
+mw
+```
+
+**Reading.** Our MAREA walking per-recording MAPE (8–13 %; MPE −8 % `combined`, −12 % `clemson`,
+−0.5 % `oxwalk`) is at or below the paper's zero-shot range (≈13–29 % MAPE; MPE −8 to +11 %)
+and is better than the paper's worst cases, partly because MAREA walking is mostly steady treadmill/indoor walking (closest
+to Clemson "regular", the easiest condition) rather than free-living. The sign of the bias
+for `clemson`/`combined` (undercount) matches the paper's OxWalk→Clemson direction, not its
+Clemson→OxWalk direction (overcount); `oxwalk` shows no net bias. Qualitatively the story agrees: the model transfers reasonably to unseen steady
+walking and degrades when the behaviour leaves the training distribution.
+
+**What cannot be concluded.** MAREA walking is not the paper's hard case (irregular / free-living
+walking), so this validation says little about the paper's headline claim of robustness under
+irregular gait. It supports "no gross problem with the fit on steady walking"; it does not test
+the claim.
+
+## 6.1 Resubstitution check (does our fit reproduce sensible in-sample counts?)
+
+The final models were trained on *all* participants, so the following is **not** a held-out test
+and must not be compared to the paper's 10.1 % / 13.1 % as if it were. It only checks the fit is
+not broken: a healthy fit should be at or below the paper's held-out error.
+
+```{python}
+#| label: tbl-insample
+f1, f2 = CACHE / "insample_clemson.csv", CACHE / "insample_oxwalk.csv"
+if f1.exists() and f2.exists():
+    c = pd.read_csv(f1); c["ape"] = (c.mass - c.true).abs() / c.true * 100; c["pe"] = (c.mass - c.true) / c.true * 100
+    o = pd.read_csv(f2); o["ape"] = (o.mass - o.true).abs() / o.true * 100; o["pe"] = (o.mass - o.true) / o.true * 100
+    pc = c.groupby("condition")[["ape", "pe"]].mean().loc[["Regular", "SemiRegular", "Irregular"]]
+    pc.loc["Overall"] = c[["ape", "pe"]].mean()
+    pc["paper MAPE (held-out)"] = [4.61, 9.90, 15.78, 10.10]; pc["paper MPE (held-out)"] = [-2.33, -5.28, 2.87, -1.58]
+    display(pc.round(2).rename(columns={"ape": "ours MAPE (in-sample)", "pe": "ours MPE (in-sample)"}))
+    print(f"OxWalk, oxwalk model in-sample: MAPE {o.ape.mean():.2f}%  MPE {o.pe.mean():.2f}%   (paper held-out: 13.06 / -2.78)")
+    print("In-sample error is far below held-out error (about 1-2% vs 10-13%): the models fit their training participants tightly,")
+    print("so the generalisation gap (1-2% -> 8-13% on MAREA walking) is the quantity that matters.")
+else:
+    print("in-sample caches not computed yet")
+```
+
+## 6.2 Versus the open-source algorithms on MAREA (Koffman et al.)
+
+Koffman, Crainiceanu & Muschelli ("Evaluating Step Counting Algorithms on Sub-Second Wrist-Worn
+Accelerometry", `pubs/Walking_algorithms_comparison.pdf`) ran ActiLife, ADEPT, Oak, SDT, Verisense
+and **stepcount (RF and SSL)** on the same MAREA wrist data (19 participants, 128 Hz, left wrist,
+heel strikes from shoe force sensors) plus Clemson and OxWalk. We can put our three models next to
+their MAREA numbers (their Tables 3, 4, 6; "MAREA regular").
+
+**How their metric is defined (checked in their code, `lilykoff/step_algorithms`).**
+`step_01_download_process_data.R` writes `data/processed/marea.csv.gz`, which is the same file we
+split (same columns; accelerometer already converted from m/s² to g). `generate_results_dfs*.R` then
+drops every recording whose activity name contains "run" (`filter(grepl("run", cat_activity)==FALSE)`),
+**sums steps across a participant's remaining walking recordings**, computes
+$\text{APE}_i=|\hat C_i-C_i|/C_i\cdot100$ and bias $=\hat C_i-C_i$ per participant, and reports the
+mean over the 19 participants. Their Table 4 "MAREA" row is exactly this. We use the same four
+walking activities, the same per-participant sum, and the same APE/bias.
+Differences that remain: (i) they run the algorithms at 30 Hz resampled from 128 Hz (and run each
+algorithm on the combined walk+run file before dropping the running seconds), whereas our models
+run at 15/25 Hz on the walking recordings only; (ii) our step totals differ from theirs by 0–2 steps
+in 24 of 39 recordings (28,111 vs 28,079 steps, 0.1 %), presumably boundary handling; (iii)
+second-level walking recognition is as they define it (≥1 step in the second).
+They resample to 30 Hz before running stepcount; our models run at their native 15/25 Hz
+(`StepCounter` resamples from 128 Hz). Precision is not meaningful for MAREA in their analysis,
+so only recall and F1 are comparable and F1 there is dominated by recall.
+
+```{python}
+#| label: tbl-koffman
+# --- our models, in the paper's convention (walking only, per participant) ---
+walk_d = d[d.kind == "walk"]
+def per_participant(m):
+    g = walk_d[walk_d.model == m].groupby("subject")[["true", "mass", "switch"]].sum()
+    ape = (g.mass - g.true).abs() / g.true * 100; bias = g.mass - g.true
+    return ape, bias
+
+def second_level(m):
+    """Per-participant recall / precision / F1 of 'walking seconds' (>=1 step), from cached probabilities.
+    Predicted steps = centres of runs of p>=0.5 (same hard-switch rule as the evaluation scripts)."""
+    fs = int(d[d.model == m].model_fs.iloc[0]); out = {}
+    for r in man[~man.activity.str.contains("run")].itertuples():
+        p = probs[f"{m}|{r.activity}|{r.subject}"]; row = p >= .5
+        pad = np.concatenate([[False], row, [False]])
+        st = np.flatnonzero(~pad[:-1] & pad[1:]); en = np.flatnonzero(pad[:-1] & ~pad[1:])
+        pred_s = ((st + en - 1) / 2 / fs).astype(int)
+        true_s = np.floor(ev[(ev.subject == r.subject) & (ev.activity == r.activity)].time_s.to_numpy()).astype(int)
+        n_sec = int(np.ceil(len(p) / fs)); T = np.zeros(n_sec, bool); P = np.zeros(n_sec, bool)
+        T[true_s[true_s < n_sec]] = True; P[pred_s[pred_s < n_sec]] = True
+        a = out.setdefault(r.subject, np.zeros(3)); a += [(T & P).sum(), (~T & P).sum(), (T & ~P).sum()]
+    rec, prec, f1 = [], [], []
+    for tp, fp, fn in out.values():
+        R = tp / max(tp + fn, 1); Pp = tp / max(tp + fp, 1)
+        rec.append(R); prec.append(Pp); f1.append(2 * R * Pp / max(R + Pp, 1e-9))
+    return np.mean(rec), np.mean(prec), np.mean(f1)
+
+rows = []
+pub = {  # Koffman et al., MAREA regular: MAPE (SD), bias steps (SD), recall, F1
+ "stepcount SSL (published)": (11.4, 10, -210, 262, .99, .99), "stepcount RF (published)": (12.9, 10, -232, 277, .98, .99),
+ "SDT (published)": (16.1, 11, -257, 273, .99, .99), "Verisense revised (published)": (19.2, 11, -333, 324, .94, .97),
+ "Verisense original (published)": (30.6, 15, -491, 445, .86, .92), "ADEPT (published)": (36.2, 23, -652, 614, .64, .75),
+ "ActiLife (published)": (39.0, 13, -633, 514, .92, .96), "Oak (published)": (42.5, 28, -742, 730, .58, .69)}
+for k, v in pub.items():
+    rows.append(dict(method=k, MAPE=f"{v[0]:.1f} ({v[1]:.0f})", bias_steps=f"{v[2]:.0f} ({v[3]:.0f})", recall=v[4], F1=v[5]))
+for m in MODELS:
+    ape, bias = per_participant(m); R, P_, F = second_level(m)
+    rows.append(dict(method=f"{m} (this repo, final fit)", MAPE=f"{ape.mean():.1f} ({ape.std():.0f})",
+                     bias_steps=f"{bias.mean():.0f} ({bias.std():.0f})", recall=round(R, 2), F1=round(F, 2)))
+kt = pd.DataFrame(rows).set_index("method")
+kt
+```
+
+```{python}
+#| label: tbl-koffman-paired
+#| tbl-cap: "Exact per-participant comparison using the totals published in the authors' repository (30 Hz algorithms; walking only)."
+kc = CACHE / "koffman_marea_totals.csv"
+if not kc.exists():
+    print("run: Rscript analysis/fetch_koffman_marea.R   (downloads their per-participant totals)")
+else:
+    from scipy import stats
+    k = pd.read_csv(kc).rename(columns={"cat_activity": "activity"}); k["subject"] = k.id_subject.str[1:].astype(int)
+    wide = k.pivot_table(index=["subject", "activity"], columns="algorithm", values="total_steps").reset_index()
+    pp = wide.groupby("subject").sum(numeric_only=True)
+    ssl = (pp.steps_scssl_30 - pp.steps_truth).abs() / pp.steps_truth * 100
+    print(f"Published SSL MAPE recomputed from their totals: {ssl.mean():.1f}% (paper Table 4: 11.4%)")
+    rows = []
+    for m in MODELS:
+        g = walk_d[walk_d.model == m].groupby("subject")[["true", "mass"]].sum()
+        ape = (g.mass - g.true).abs() / g.true * 100; dlt = ape - ssl.loc[ape.index]
+        se = dlt.std() / np.sqrt(len(dlt))
+        rows.append(dict(model=m, MAPE=round(ape.mean(), 1), SSL_MAPE=round(ssl.mean(), 1),
+                         diff_pp=round(dlt.mean(), 1), CI=f"[{dlt.mean()-2.1*se:+.1f}, {dlt.mean()+2.1*se:+.1f}]",
+                         paired_t_p=round(stats.ttest_1samp(dlt, 0).pvalue, 2),
+                         wilcoxon_p=round(stats.wilcoxon(dlt).pvalue, 2), better_than_SSL=f"{(dlt<0).sum()}/{len(dlt)}"))
+    display(pd.DataFrame(rows).set_index("model"))
+    # per activity (participant x activity), published SSL vs ours: mean percentage error
+    rec = wide[["subject", "activity", "steps_truth", "steps_scssl_30"]].copy()
+    rec["SSL (published)"] = (rec.steps_scssl_30 - rec.steps_truth) / rec.steps_truth * 100
+    o = walk_d.assign(pe=lambda x: (x.mass - x.true) / x.true * 100).pivot_table(index=["subject", "activity"], columns="model", values="pe").reset_index()
+    j = rec.merge(o, on=["subject", "activity"])
+    print("Mean percentage error (MPE, %) by activity; negative = undercount")
+    display(j.groupby("activity")[["SSL (published)"] + MODELS].mean().round(1))
+```
+
+**Reading, with the caveats that matter.**
+
+* **Counts are statistically indistinguishable from stepcount SSL.** Per-participant MAPE is
+  9.5 % (`combined`), 12.7 % (`clemson`), 14.1 % (`oxwalk`) vs 11.4 % for SSL, and mean bias
+  −110, −166 and −15 steps vs −210. Paired by participant, the differences from SSL are
+  −1.9, +1.3 and +2.7 percentage points with 95 % intervals spanning zero (paired t-test p 0.53–0.64;
+  Wilcoxon p 0.18–0.65; ours better in 9, 5 and 8 of 19 participants). All three are clearly better than
+  Oak, ActiLife, ADEPT and both Verisense versions (19–43 %). By activity SSL undercounts
+  treadmill and indoor walking more than our models (MPE −17 % and −19 % vs −14 % to +7 %) and
+  does better outdoors (−7 % vs −8 % to −15 %).
+* **Stepcount SSL was not run by us here.** Its numbers are from the paper, produced by the paper's
+  authors with their own pipeline (30 Hz resampling). We did not re-run it on our `data/marea` files,
+  so any claim of equivalence rests on the published tables only.
+* **Walking recognition: stepcount SSL is clearly better.** Published recall/F1 on MAREA is
+  0.99/0.99 for SSL (0.98/0.99 RF, 0.99/0.99 SDT). Ours (second-level recall of walking seconds,
+  hard threshold p ≥ 0.5) is 0.91/0.95 for `clemson` and 0.83–0.84/0.91 for `combined` and
+  `oxwalk`, closer to ActiLife (0.92/0.96) and Verisense revised (0.94/0.97). So although our
+  *mass* counts match SSL's count accuracy, our models miss more walking seconds than SSL does.
+* **Different target.** Stepcount SSL is a *walking-bout detector plus step counter* pretrained
+  on a very large unlabelled corpus (UK Biobank) and fine-tuned on OxWalk, built for free-living
+  days. Our models are dense step localisers trained from scratch on two small step-annotated
+  datasets. On steady MAREA walking they are comparable; the paper's free-living and irregular
+  settings, where SSL is strongest, are exactly where MAREA does not test.
+* **Running.** The Koffman paper reports that ADEPT, Oak, stepcount RF and Verisense original
+  lose steps as speed rises into running, while the other methods (stepcount SSL among them) show
+  no clear relationship between error and speed. Our three models belong in the first group:
+  they lose a large and increasing share of steps in running (Section 3), which our
+  diagnostics attribute to training-set cadence and amplitude coverage (Sections 4 and 7).
+  So on running, the published SSL model appears to be better than ours; that comparison is
+  qualitative (their speed plot, not re-computed here).
+* **Sampling rate.** Their Table 7 shows stepcount SSL is unstable at 15 Hz (correlation with its
+  30 Hz output 0.08 on Clemson) but stable at ≥25 Hz (MAREA: 1.00). Our models are built for
+  15 Hz (clemson/combined) and 25 Hz (oxwalk), so rate sensitivity is a point in our favour for
+  low-rate wrist data, though we have not measured it directly.
+
+# 7. Diagnostic: is running failure a distribution-shift problem?
+
+On the running recordings only, undo each shift in isolation. **This is a diagnostic, not a
+proposed fix**: it changes the input to resemble the training data and asks whether the model's
+counts recover.
+
+* *amplitude*: multiply the signal by 0.2 (so running amplitude is closer to the raster range);
+* *cadence*: declare the sampling rate 0.75× its true value, so steps look 25 % slower (step counts are unchanged by a pure time rescaling).
+
+```{python}
+#| label: fig-cf
+#| fig-cap: "Running recordings: bias with each shift removed. If the failure were a broken fit rather than distribution shift, neither manipulation would help."
+fcf = CACHE / "marea_counterfactual.csv"
+if fcf.exists():
+    cf = pd.read_csv(fcf); cf["pe"] = (cf.mass - cf.true) / cf.true * 100
+    s = cf.groupby(["model", "variant"]).apply(lambda g: (g.mass.sum() - g.true.sum()) / g.true.sum() * 100).unstack()[["as-is", "amplitude", "cadence", "both"]]
+    display(s.round(1).rename_axis("pooled bias %"))
+    fig, ax = plt.subplots(figsize=(7, 3.6))
+    for i, m in enumerate(["clemson", "combined"]):
+        ax.bar(np.arange(4) + (i - .5) * .35, s.loc[m], .35, color=COL[m], label=m)
+    ax.set_xticks(range(4)); ax.set_xticklabels(s.columns); ax.axhline(0, color="k", lw=.8); ax.set_ylabel("pooled bias (%)"); ax.legend(); plt.show()
+else:
+    print("counterfactual cache not computed yet (python analysis/marea_eval.py --only cf)")
+```
+
+**Result.** On running, pooled bias is −26 % (`clemson`) and −45 % (`combined`) as-is.
+
+* *Cadence only* (look 25 % slower) cuts the undercount to −13 % and −27 %: roughly half of the
+  error goes away, so training-cadence coverage is a real contributor.
+* *Amplitude only* (×0.2) makes it **worse** (−48 %, −62 %), and combining both is no better than
+  cadence alone for `clemson` (−19 %) and about the same for `combined` (−27 %). The simple
+  "running is clipped by the raster range" explanation is therefore not supported. Shrinking the
+  signal also shrinks the waveform shape the model uses, so this manipulation is crude and does
+  not rule out amplitude effects entirely.
+* Even with cadence removed, an undercount of −13 % to −27 % remains, so other differences between
+  running and walking waveforms also matter.
+* Only `clemson` and `combined` were tested here, not `oxwalk`.
+
+# 8. How our fit compares with the paper's protocol
+
+Checked against `scripts/`, `step_counting/*/code`, and the paper's Appendix A (Table A1).
+
+| Item | Paper | Our final fits | Verdict |
+|---|---|---|---|
+| Optimiser, LR, WD, batch, cosine to 1e-5, grad clip 1.0 | Adam 3e-4, 1e-4, 64, yes, 1.0 | identical (`_fit_common.py`) | ✅ same |
+| Epochs | max 120 | 120 | ✅ same |
+| Count loss: α_max, warmup, ramp | 0.15, 30, 50 | 0.15, 30 (ratio 0.25), 50 | ✅ same |
+| Label width / rate / window | 5 @15 Hz, 7 @25 Hz, 60 s | same | ✅ same |
+| Clemson input | gravity-removed raster, original labels | same | ✅ same |
+| OxWalk input | unprocessed raster, motion-energy *realigned* training labels | same (realigned folder) | ✅ same |
+| Raster ranges | per-axis 0.5/99.5 pct of training data | same (all participants) | ✅ same |
+| Subject-balanced sampling | yes | yes | ✅ same |
+| Combined (Clemson+OxWalk) model | not in paper | pooled at 15 Hz, label width 5 | ➕ our addition |
+| **Training participants** | 21–35 train / validation / test splits | **all** participants, no hold-out | ⚠️ no in-fit generalisation estimate |
+| **Checkpoint: Clemson** | `run_clemson.sh`: patience 999, `checkpoint_selection final` | final epoch | ✅ matches the repo's actual protocol |
+| **Checkpoint: OxWalk** | `train_one_fold`: best *validation* subject-relative MSE in the full-α phase, patience 8 | final epoch, no validation | ⚠️ differs |
+| OxWalk warmup | `oxwalk/config.py` default `warmup_ratio 0.2` → 24 epochs (run script does not override) | 30 epochs | ⚠️ small difference vs the CV runs |
+| Patience stated in paper | Table A1: 20 epochs | repo scripts: 8 (OxWalk), 999 (Clemson/cross-dataset) | ⚠️ paper text and code disagree |
+| Model selection described in paper | "validation participants were used for model selection" | Clemson/cross-dataset code uses the final epoch | ⚠️ paper text and code disagree |
+
+**Do the differences matter?**
+
+* **Final-epoch weights vs validation-selected (OxWalk).** The late-epoch training loss is noisy,
+  so final weights are a single draw from a flat, slightly noisy region. The effect on counts is
+  probably a few percent either way, but it is a real departure from the OxWalk CV protocol and
+  it cannot be quantified without a held-out run. Cheap remedy: average the weights of the last
+  *k* epochs, or keep the epoch with the best *validation* count error from a held-out fit.
+* **No held-out split.** Not a bug, but it means MAREA (and any other external set) is our only
+  generalisation evidence. Training on all subjects is the right choice for a deployed model, as
+  the paper's own transfer experiments do.
+* **Warmup 24 vs 30 (OxWalk CV).** Cosmetic; it shifts the α ramp by six epochs and the final
+  weights still see α = 0.15.
+* **Paper/code mismatch in patience and selection.** This is a *reproducibility-of-the-paper*
+  issue, not a flaw in our fits. It is worth resolving with the authors because "validation
+  participants for model selection" and "patience 20" are not what the released scripts do.
+* **Count loss scale (Section 2).** The count term is unbounded and dominates the loss after
+  epoch 32. That is the paper's design, and the paper's ablation (their Tables 7–9) shows it is
+  needed, so our fit being faithful to it is correct. It does make train loss uninformative for
+  convergence checking, so the per-term logging added in this repo (`bce`, `count_mse`, `alpha`
+  in `loss_log.csv` for new runs) is worth keeping.
+
+# 9. Conclusions
+
+1. **The models are in line with the paper in the way that can be tested here.** On steady
+   walking at an unseen sensor/protocol, error (~6–15 % MAPE, mild undercount) is within the
+   paper's zero-shot range, and the in-sample counts reproduce well.
+2. **Running is a hard failure and is out of scope for the paper.** Training cadences do not
+   cover running (a cadence-only manipulation recovers about half of the undercount), and other
+   waveform differences contribute; every model undercounts severely, `oxwalk` worst. Do not use these models
+   for running without retraining on running data, and say so when reporting results.
+3. **No large fitting error was found.** Hyperparameters, losses, preprocessing and label setup
+   match the paper. The notable departures are protocol-level (no validation-based checkpoint
+   for OxWalk; all participants used for training) and the paper/code inconsistencies above.
+4. **Recommended next steps.**
+   * Re-fit with a held-out split for OxWalk to measure the final-epoch vs validation-selected gap.
+   * If running or fast walking matters, add running data (e.g. MAREA itself, held-out by
+     participant); a larger raster range alone is untested and may not help.
+   * Versus the open-source tools: stepcount SSL matches our count accuracy on MAREA walking,
+     recognises walking seconds better, and appears to cope with running better; closing that
+     gap likely needs more diverse training data (SSL pretrains on UK Biobank), not more epochs.
+   * Validate on a dataset closer to the paper's hard case (free-living or irregular walking),
+     e.g. PAAWS free-living walking labels or an activPAL-referenced wrist dataset.
+   * Report MPE alongside MAPE, as the paper does, because the sign of the error differs by direction.
+
+*Caveats.* MAREA's step reference (foot-pressure heel strikes) is not the same instrument as the
+paper's video annotation; 68 recordings from 19 participants give wide intervals; the
+counterfactual in Section 7 is a diagnostic and was run on two models.
