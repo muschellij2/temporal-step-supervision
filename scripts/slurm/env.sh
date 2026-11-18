@@ -13,29 +13,41 @@ export PYTHONPATH="$PWD:${PYTHONPATH:-}"
 # (requirements.txt; the paper used torch 2.5.1+cu121).
 # If conda is not on PATH in batch jobs, add the appropriate `module load ...` line here.
 CONDA_ENV="${CONDA_ENV:-tss}"
-# 1) conda not visible in the batch job? -> load the login profile (module load conda_R ...)
-if ! command -v conda >/dev/null 2>&1 && [ -f ~/.bash_profile ]; then
-  echo "conda not on PATH; sourcing ~/.bash_profile"
-  source ~/.bash_profile
-fi
-# 2) still not? -> source conda's own init script (override with CONDA_SH=/path/to/conda.sh)
-if ! command -v conda >/dev/null 2>&1; then
-  for _f in "${CONDA_SH:-}" /jhpce/shared/community/core/conda_R/4.3.x/etc/profile.d/conda.sh; do
-    if [ -n "$_f" ] && [ -f "$_f" ]; then echo "sourcing $_f"; source "$_f"; break; fi
-  done
-  unset _f
-fi
-echo "conda: $(command -v conda || echo 'NOT FOUND')"
-if command -v conda >/dev/null 2>&1; then
-  eval "$(conda shell.bash hook)"
-  conda activate "$CONDA_ENV" || echo "WARNING: 'conda activate $CONDA_ENV' failed (is the env name right? CONDA_ENV=$CONDA_ENV)"
-fi
-# 3) last resort: use the env's python directly (no activation scripts)
-if [ "${CONDA_DEFAULT_ENV:-}" != "$CONDA_ENV" ] && [ -x "$HOME/.conda/envs/$CONDA_ENV/bin/python" ]; then
-  echo "WARNING: falling back to PATH-only activation of $HOME/.conda/envs/$CONDA_ENV"
-  export PATH="$HOME/.conda/envs/$CONDA_ENV/bin:$PATH"
+# Preferred: use the env's python directly. `conda shell.bash hook` / `conda activate`
+# HUNG for 19+ min in a batch job on JHPCE, and a pip-installed torch env needs no activation.
+# Override the location with CONDA_ENV_PREFIX=/path/to/env
+_envdir="${CONDA_ENV_PREFIX:-$HOME/.conda/envs/$CONDA_ENV}"
+if [ -x "$_envdir/bin/python" ]; then
+  echo "using env python directly: $_envdir (skipping conda activate)"
+  export PATH="$_envdir/bin:$PATH"
   export CONDA_DEFAULT_ENV="$CONDA_ENV"
+else
+  echo "env not found at $_envdir; falling back to conda activate"
+  # 1) conda not visible in the batch job? -> load the login profile (module load conda_R ...)
+  if ! command -v conda >/dev/null 2>&1 && [ -f ~/.bash_profile ]; then
+    echo "conda not on PATH; sourcing ~/.bash_profile"
+    source ~/.bash_profile
+  fi
+  # 2) still not? -> source conda's own init script (override with CONDA_SH=/path/to/conda.sh)
+  if ! command -v conda >/dev/null 2>&1; then
+    for _f in "${CONDA_SH:-}" /jhpce/shared/community/core/conda_R/4.3.x/etc/profile.d/conda.sh; do
+      if [ -n "$_f" ] && [ -f "$_f" ]; then echo "sourcing $_f"; source "$_f"; break; fi
+    done
+    unset _f
+  fi
+  echo "conda: $(command -v conda || echo 'NOT FOUND')"
+  if command -v conda >/dev/null 2>&1; then
+    eval "$(conda shell.bash hook)"
+    conda activate "$CONDA_ENV" || echo "WARNING: 'conda activate $CONDA_ENV' failed (is the env name right? CONDA_ENV=$CONDA_ENV)"
+  fi
+  # 3) last resort: use the env's python directly (no activation scripts)
+  if [ "${CONDA_DEFAULT_ENV:-}" != "$CONDA_ENV" ] && [ -x "$HOME/.conda/envs/$CONDA_ENV/bin/python" ]; then
+    echo "WARNING: falling back to PATH-only activation of $HOME/.conda/envs/$CONDA_ENV"
+    export PATH="$HOME/.conda/envs/$CONDA_ENV/bin:$PATH"
+    export CONDA_DEFAULT_ENV="$CONDA_ENV"
+  fi
 fi
+unset _envdir
 [ -n "${_had_e:-}" ] && set -e   # restore the caller's set -e / set -u
 [ -n "${_had_u:-}" ] && set -u
 unset _had_e _had_u
