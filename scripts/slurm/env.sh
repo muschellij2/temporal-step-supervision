@@ -12,4 +12,18 @@ if command -v conda >/dev/null 2>&1; then
   eval "$(conda shell.bash hook)"
   conda activate "$CONDA_ENV"
 fi
-python -c "import torch; print('torch', torch.__version__, '| cuda available:', torch.cuda.is_available())"
+# Fail loudly instead of silently running with the wrong python.
+if [ "${CONDA_DEFAULT_ENV:-}" != "$CONDA_ENV" ]; then
+  echo "ERROR: conda env '$CONDA_ENV' is not active (CONDA_DEFAULT_ENV='${CONDA_DEFAULT_ENV:-}')." >&2
+  echo "Add the right 'module load ...' line to scripts/slurm/env.sh or set CONDA_ENV=<name>." >&2
+  exit 1
+fi
+echo "conda env: $CONDA_DEFAULT_ENV | python: $(command -v python)"
+# Ignore ~/.local (user-level pip packages). A stale nvidia-cudnn there shadowed the
+# env's copy and crashed with "undefined symbol: cudnnGetLibConfig".
+export PYTHONNOUSERSITE=1
+python - <<'PY'
+import torch
+print("torch", torch.__version__, "from", torch.__file__)
+print("cuda available:", torch.cuda.is_available(), "| cudnn:", torch.backends.cudnn.version())
+PY
