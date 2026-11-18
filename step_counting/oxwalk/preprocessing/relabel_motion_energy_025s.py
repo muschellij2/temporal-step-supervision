@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent
-CODE_DIR = ROOT / "code"
+CODE_DIR = ROOT.parent / "code"  # oxwalk/code is a sibling of oxwalk/preprocessing
 if str(CODE_DIR) not in sys.path:
     sys.path.insert(0, str(CODE_DIR))
 

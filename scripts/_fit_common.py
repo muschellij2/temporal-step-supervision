@@ -20,6 +20,15 @@ BATCH, LR, WD, ETA_MIN, EPOCHS = 64, 3e-4, 1e-4, 1e-5, 120
 WARMUP_RATIO, RAMP_EPOCHS, ALPHA_MAX, REL_EPS = 0.25, 50, 0.15, 1.0
 
 
+def is_done(out, epochs):
+    """True if a finished run (model.pt + a loss log with `epochs` rows) is already in `out`."""
+    out = Path(out)
+    try:
+        return (out / "model.pt").exists() and len(pd.read_csv(out / "loss_log.csv")) == epochs
+    except Exception:
+        return False
+
+
 def save_config(out, cfg):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)

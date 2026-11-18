@@ -90,10 +90,14 @@ def main():
     p.add_argument("--epochs", type=int, default=fc.EPOCHS)
     p.add_argument("--num_workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--overwrite", action="store_true", help="retrain even if a finished model exists")
     a = p.parse_args()
     a.data_root = a.data_root or ("data/clemson" if a.dataset == "clemson"
                                   else "data/oxwalk/OxWalk_Dec2022_peakvalley_025s/Wrist_25Hz")
     out = Path(a.output_dir or f"runs/final_{a.dataset}")
+    if not a.overwrite and fc.is_done(out, a.epochs):
+        print(f"{out} already has a finished {a.epochs}-epoch model.pt - skipping (use --overwrite to retrain).")
+        return
     fc.save_config(out, vars(a))
     device = torch.device(a.device)
     {"clemson": fit_clemson, "oxwalk": fit_oxwalk}[a.dataset](a, out, device)
