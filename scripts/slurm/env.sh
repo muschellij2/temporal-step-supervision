@@ -1,6 +1,11 @@
 # Sourced by every job. EDIT THIS FILE for your JHPCE environment.
 # Jobs must be submitted from the repo root (sbatch sets SLURM_SUBMIT_DIR to it).
-source ~/.bash_profile
+# The .sbatch files use `set -euo pipefail`, but ~/.bash_profile and conda's activate
+# scripts read unset variables (e.g. SYS_SYSROOT) and would abort. Relax -e/-u while
+# loading them, then restore the caller's options below.
+case $- in *e*) _had_e=1;; esac
+case $- in *u*) _had_u=1;; esac
+set +eu
 export PYTHONPATH="$PWD:${PYTHONPATH:-}"
 
 # --- Python environment (edit) -------------------------------------------
@@ -12,6 +17,9 @@ if command -v conda >/dev/null 2>&1; then
   eval "$(conda shell.bash hook)"
   conda activate "$CONDA_ENV"
 fi
+[ -n "${_had_e:-}" ] && set -e   # restore the caller's set -e / set -u
+[ -n "${_had_u:-}" ] && set -u
+unset _had_e _had_u
 # Fail loudly instead of silently running with the wrong python.
 if [ "${CONDA_DEFAULT_ENV:-}" != "$CONDA_ENV" ]; then
   echo "ERROR: conda env '$CONDA_ENV' is not active (CONDA_DEFAULT_ENV='${CONDA_DEFAULT_ENV:-}')." >&2
