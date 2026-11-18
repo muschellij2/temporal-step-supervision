@@ -8,12 +8,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parent
-CODE_DIR = ROOT.parent / "code"  # oxwalk/code is a sibling of oxwalk/preprocessing
-if str(CODE_DIR) not in sys.path:
-    sys.path.insert(0, str(CODE_DIR))
+# Repo root = .../step_counting/oxwalk/preprocessing/<this file> -> three levels up.
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-from train_utils import bandpass_filter
+from step_counting.oxwalk.code.train_utils import bandpass_filter
 
 
 RATE_RE = re.compile(r"(25|100)Hz$")
