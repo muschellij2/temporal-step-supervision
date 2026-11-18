@@ -83,7 +83,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--dataset", choices=["clemson", "oxwalk"], required=True)
     p.add_argument("--data_root", default=None,
-                   help="default: data/Clemson_9data (clemson) or the REALIGNED "
+                   help="default: data/clemson (clemson) or the REALIGNED "
                         "data/oxwalk/OxWalk_Dec2022_peakvalley_025s/Wrist_25Hz (oxwalk)")
     p.add_argument("--output_dir", default=None, help="default: runs/final_<dataset>")
     p.add_argument("--device", default="cuda:0")
@@ -91,7 +91,7 @@ def main():
     p.add_argument("--num_workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=42)
     a = p.parse_args()
-    a.data_root = a.data_root or ("data/Clemson_9data" if a.dataset == "clemson"
+    a.data_root = a.data_root or ("data/clemson" if a.dataset == "clemson"
                                   else "data/oxwalk/OxWalk_Dec2022_peakvalley_025s/Wrist_25Hz")
     out = Path(a.output_dir or f"runs/final_{a.dataset}")
     fc.save_config(out, vars(a))

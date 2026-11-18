@@ -33,7 +33,7 @@ from step_counting.cross_dataset.code.cross_loaders import load_clemson_15hz, lo
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--clemson_root", default="data/Clemson_9data")
+    p.add_argument("--clemson_root", default="data/clemson")
     p.add_argument("--oxwalk_root", default="data/oxwalk_wrist_15hz")
     p.add_argument("--output_dir", default="runs/final_combined")
     p.add_argument("--device", default="cuda:0")
