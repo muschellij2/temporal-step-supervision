@@ -1,7 +1,7 @@
 """Simple prediction wrapper for the final models in ``runs/``.
 
     from step_counting.inference import StepCounter
-    sc = StepCounter("combined")                  # or "clemson" / "oxwalk"
+    sc = StepCounter("combined")                  # or "clemson" / "oxwalk" / "all3"
     res = sc.predict(xyz, fs=30.0)                # xyz: (N, 3) wrist accelerometer in g
     res.step_count, res.step_times_s
 
@@ -39,6 +39,7 @@ G = 9.80665
 MODEL_SPECS = {
     "clemson":  dict(run="final_clemson",  impl="clemson", fs=15, preprocess="gravity_only", label_width=5, base_ch=24),
     "combined": dict(run="final_combined", impl="clemson", fs=15, preprocess="gravity_only", label_width=5, base_ch=24),
+    "all3":     dict(run="final_all3",     impl="clemson", fs=15, preprocess="gravity_only", label_width=5, base_ch=24),  # + MAREA (running)
     "oxwalk":   dict(run="final_oxwalk",   impl="oxwalk",  fs=25, preprocess="none",         label_width=7, base_ch=32),
 }
 WINDOW_SEC, HEIGHT_BINS = 60, 16
