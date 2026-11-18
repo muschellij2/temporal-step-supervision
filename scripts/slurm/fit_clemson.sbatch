@@ -3,7 +3,7 @@
 # Quick smoke test (1 epoch):  EPOCHS=1 sbatch scripts/slurm/fit_clemson.sbatch
 #SBATCH --job-name=tss_clemson
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:l40s:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
 #SBATCH --time=04:00:00

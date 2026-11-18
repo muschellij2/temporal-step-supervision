@@ -1,7 +1,6 @@
 # Sourced by every job. EDIT THIS FILE for your JHPCE environment.
 # Jobs must be submitted from the repo root (sbatch sets SLURM_SUBMIT_DIR to it).
 source ~/.bash_profile
-cd "${SLURM_SUBMIT_DIR:?submit with sbatch from the repo root}"
 export PYTHONPATH="$PWD:${PYTHONPATH:-}"
 
 # --- Python environment (edit) -------------------------------------------
@@ -30,7 +29,7 @@ export LD_LIBRARY_PATH="$(echo "${LD_LIBRARY_PATH:-}" | tr ':' '\n' | grep -v '/
 python - <<'PY'
 import torch
 print("torch", torch.__version__, "from", torch.__file__)
-print("cuda available:", torch.cuda.is_available(), "| cudnn:", torch.backends.cudnn.version())
+print("cuda available:", torch.cuda.is_available())
 if torch.cuda.is_available():
     import sys
     maj, mn = torch.cuda.get_device_capability()
@@ -40,5 +39,6 @@ if torch.cuda.is_available():
     print("GPU:", torch.cuda.get_device_name(0), f"(CC {maj}.{mn}) | torch built for:", archs)
     if not ok:
         sys.exit(f"ERROR: this torch build has no kernels for CC {maj}.{mn}. "
-                 "Request a newer GPU (e.g. the L40S) or install a torch build that supports it.")
+                 "Request a supported GPU: --gres=gpu:l40s:1 (not titanv/tesv100/tesv100s, CC 7.0).")
+    print("cudnn:", torch.backends.cudnn.version())
 PY
