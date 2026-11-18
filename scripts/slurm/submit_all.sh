@@ -1,6 +1,7 @@
 #!/bin/bash
 # Submit everything from the repo root:  bash scripts/slurm/submit_all.sh
 # Smoke test first:                      EPOCHS=1 bash scripts/slurm/submit_all.sh
+source ~/.bash_profile
 set -euo pipefail
 mkdir -p logs   # SLURM does not create the --output directory
 prep=$(sbatch --parsable scripts/slurm/prep_oxwalk.sbatch)

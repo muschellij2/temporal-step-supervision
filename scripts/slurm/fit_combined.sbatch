@@ -8,8 +8,9 @@
 #SBATCH --mem=32G
 #SBATCH --time=08:00:00
 #SBATCH --output=logs/%x_%j.out
+source ~/.bash_profile
 set -euo pipefail
-source "${SLURM_SUBMIT_DIR}/scripts/slurm/env.sh"
+source "scripts/slurm/env.sh"
 nvidia-smi -L || true
 
 python scripts/fit_final_combined.py --device cuda:0 --num_workers ${SLURM_CPUS_PER_TASK:-4} --epochs ${EPOCHS:-120}

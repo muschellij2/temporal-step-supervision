@@ -8,8 +8,9 @@
 #SBATCH --mem=16G
 #SBATCH --time=02:00:00
 #SBATCH --output=logs/%x_%j.out
+source ~/.bash_profile
 set -euo pipefail
-source "${SLURM_SUBMIT_DIR}/scripts/slurm/env.sh"
+source "scripts/slurm/env.sh"
 
 if [ ! -d data/oxwalk/OxWalk_Dec2022_peakvalley_025s ]; then
   python step_counting/oxwalk/preprocessing/relabel_motion_energy_025s.py \

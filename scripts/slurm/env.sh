@@ -1,5 +1,6 @@
 # Sourced by every job. EDIT THIS FILE for your JHPCE environment.
 # Jobs must be submitted from the repo root (sbatch sets SLURM_SUBMIT_DIR to it).
+source ~/.bash_profile
 cd "${SLURM_SUBMIT_DIR:?submit with sbatch from the repo root}"
 export PYTHONPATH="$PWD:${PYTHONPATH:-}"
 
