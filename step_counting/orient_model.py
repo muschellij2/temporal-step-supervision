@@ -7,6 +7,10 @@ Arms (all use the `combined` recipe: 15 Hz, gravity-removed, label width 5, Step
   xyz_vm_drop  xyz + vm channels; the 3 xyz channels are zeroed in 50 % of training windows (channel dropout),
                so the net must also count from vm alone. Scored with xyz ("full") and with xyz zeroed ("vm_only").
   xyz_vm_rot   xyz + vm channels + random rotation augmentation
+  xyz_vm       xyz + vm channels, NO augmentation, NO dropout (isolates what adding VM alone does)
+  xyz_mirror / xyz_vm_mirror   the same two but augmented with all 48 signed permutations (24 rotations + 24 mirrors)
+  (rot_aug True = 24 proper rotations; "all" = 48 incl. mirrors.) The augmentation is TRAINING-ONLY: at test time the
+  recording is scored as-is (identity), no rotation is chosen.
 
 Differences from the earlier models, applied to EVERY arm so contrasts are fair:
   * raster ranges are SHARED across x/y/z: symmetric [-R, R] with R = 99.5th percentile of |axis value|
@@ -37,6 +41,13 @@ ARMS = {
     "vm":          dict(xyz=False, vm=True,  rot_aug=False, xyz_drop=0.0),
     "xyz_vm_drop": dict(xyz=True,  vm=True,  rot_aug=False, xyz_drop=0.5),
     "xyz_vm_rot":  dict(xyz=True,  vm=True,  rot_aug=True,  xyz_drop=0.0),
+    # rot_aug="all": augment with all 48 signed permutations = 24 rotations + 24 mirror images (left <-> right wrist).
+    # Needed because most Mobilise-D TVS wrist sensors are on the LEFT wrist (non-dominant hand).
+    "xyz_mirror":     dict(xyz=True,  vm=False, rot_aug="all", xyz_drop=0.0),
+    "xyz_vm_mirror":  dict(xyz=True,  vm=True,  rot_aug="all", xyz_drop=0.0),
+    # VM added next to xyz, no augmentation and no dropout: completes the 2x2 {VM channel} x {rotation/mirror augmentation}
+    #   xyz (neither) | xyz_vm (VM only) | xyz_mirror (augmentation only) | xyz_vm_mirror (both)
+    "xyz_vm":         dict(xyz=True,  vm=True,  rot_aug=False, xyz_drop=0.0),
 }
 
 
@@ -138,7 +149,8 @@ class OrientDataset(Dataset):
     def __getitem__(self, i):
         x = self.sig[i]
         if self.train and self.cfg["rot_aug"]:
-            x = rotate(x, PROPER[int(torch.randint(len(PROPER), (1,)))])   # torch RNG is seeded per worker
+            pool = ALL_ROTS if self.cfg["rot_aug"] == "all" else PROPER
+            x = rotate(x, pool[int(torch.randint(len(pool), (1,)))])        # torch RNG is seeded per worker
         img = torch.from_numpy(rasterize(make_channels(x, self.arm), self.vmins, self.vmaxs)).permute(2, 0, 1).float()
         if self.train and self.cfg["xyz_drop"] > 0 and float(torch.rand(1)) < self.cfg["xyz_drop"]:
             img[:3] = 0.0
@@ -147,8 +159,8 @@ class OrientDataset(Dataset):
 
 # ---------------------------------------------------------------------------------------- scoring
 @torch.no_grad()
-def count_windows(model, wins, arm, vmins, vmaxs, device, n_valid, mode="full", batch=16):
-    """wins (W,SPW,3) already rotated; returns mass count = sum(prob)/label_width over valid samples."""
+def window_probs(model, wins, arm, vmins, vmaxs, device, mode="full", batch=16):
+    """wins (W,SPW,3) already rotated -> step probabilities (W,SPW)."""
     imgs = np.stack([rasterize(make_channels(w, arm), vmins, vmaxs) for w in wins])
     ps = []
     for i in range(0, len(imgs), batch):
@@ -156,7 +168,12 @@ def count_windows(model, wins, arm, vmins, vmaxs, device, n_valid, mode="full", 
         if mode == "vm_only":
             b[:, :3] = 0.0
         ps.append(model(b).cpu().numpy())
-    p = np.concatenate(ps)
+    return np.concatenate(ps)
+
+
+def count_windows(model, wins, arm, vmins, vmaxs, device, n_valid, mode="full", batch=16):
+    """wins (W,SPW,3) already rotated; returns mass count = sum(prob)/label_width over valid samples."""
+    p = window_probs(model, wins, arm, vmins, vmaxs, device, mode, batch)
     valid = np.zeros(p.shape, bool); valid.reshape(-1)[:n_valid] = True
     return float((p * valid).sum() / LABEL_WIDTH)
 
@@ -198,11 +215,20 @@ class OrientPredictor:
         self.net.load_state_dict(torch.load(run / "model.pt", map_location=self.device))
         self.net.eval()
 
-    def predict(self, xyz, fs, rot_id=0, mode="full"):
+    def _prep(self, xyz, fs, rot_id):
         from step_counting.clemson.code.train_utils import preprocess_xyz
         from step_counting.inference import resample_xyz
 
         x = resample_xyz(np.asarray(xyz, np.float64), float(fs), FS).astype(np.float32)
-        x = preprocess_xyz(rotate(x, ALL_ROTS[rot_id]), FS, "gravity_only")   # rotation commutes with the filter
+        return preprocess_xyz(rotate(x, ALL_ROTS[rot_id]), FS, "gravity_only")   # rotation commutes with the filter
+
+    def predict(self, xyz, fs, rot_id=0, mode="full"):
+        x = self._prep(xyz, fs, rot_id)
         vmins, vmaxs = channel_ranges(self.arm, self.ranges)
         return count_windows(self.net, window_signal(x), self.arm, vmins, vmaxs, self.device, len(x), mode)
+
+    def predict_prob(self, xyz, fs, rot_id=0, mode="full"):
+        """Per-sample step probability at 15 Hz (padding removed), for counting inside given time spans."""
+        x = self._prep(xyz, fs, rot_id)
+        vmins, vmaxs = channel_ranges(self.arm, self.ranges)
+        return window_probs(self.net, window_signal(x), self.arm, vmins, vmaxs, self.device, mode).reshape(-1)[:len(x)]

@@ -173,15 +173,21 @@ The models read raw x/y/z, so a sensor whose axes are mounted or labelled differ
 (one Mobilise-D right-wrist person: -31 % as-is, ~0 % after the right axis permutation).
 `step_counting/orient.py` defines the 24 axis-aligned proper rotations (cube rotation group: identity, 6 quarter-turns,
 3 face half-turns, 6 edge half-turns, 8 vertex 120-deg turns; `python step_counting/orient.py` prints them) and their
-24 mirror images (left vs right wrist). Five arms (`step_counting/orient_model.py`): `xyz` (control), `xyz_rot`
+24 mirror images (left vs right wrist). Eight arms (`step_counting/orient_model.py`): `xyz` (control), `xyz_rot`
 (rotation augmentation), `vm` (vector magnitude only), `xyz_vm_drop` (xyz + vm with xyz channel dropout),
-`xyz_vm_rot` (xyz + vm + rotation augmentation).
+`xyz_vm_rot` (xyz + vm + rotation augmentation), and `xyz_mirror` / `xyz_vm_mirror` (the same augmentation drawn from all 48
+signed permutations, i.e. rotations plus left/right mirrors; most Mobilise-D wrist sensors are on the left wrist).
+`xyz_vm` adds the vm channel with no augmentation, so `xyz` / `xyz_vm` / `xyz_mirror` / `xyz_vm_mirror` form a 2x2
+(VM channel x rotation+mirror augmentation). Augmentation is training-only: models are scored as-is, no rotation is chosen at test time.
 
 ```bash
 python tests/check_orient_parity.py                                   # no-model checks (rasters identical to build_windows)
-bash scripts/slurm/submit_gpu.sh scripts/slurm/orient.sbatch          # cv + leave-one-cohort-out + full, all arms (5 array tasks)
+bash scripts/slurm/submit_gpu.sh scripts/slurm/orient.sbatch          # cv + leave-one-cohort-out + full, all arms (8 array tasks)
 python analysis/orient_external.py --device cpu                       # Mobilise-D right wrist under 24 rotations (needs the 'full' models)
 python analysis/orient_summary.py                                     # tables + analysis/orient_summary_*.png
+python scripts/fetch_mobilised_lab.py --out data/mobilised/lab        # only the Laboratory data.mat files (4 GB, not the 58 GB zips)
+python scripts/prepare_mobilised_tvs.py                               # data.mat -> data/mobilised_tvs/*.csv.gz (wrist IMU + INDIP steps)
+python analysis/orient_tvs.py --device cuda:0                         # all models as-is on 104 TVS participants, left/right wrist
 ```
 Axis-convention source: Mazza et al., BMJ Open 2021;11:e050785 (`pubs/e050785.full.pdf`), Figure 2 shows the DynaPort MM+
 (lower-back) device frame in its gravity-alignment test; it does not define the axes of the INDIP wrist module.
