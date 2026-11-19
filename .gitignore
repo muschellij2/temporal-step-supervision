@@ -7,3 +7,11 @@ runs/
 pubs/
 analysis/cache/
 logs
+
+# targets / quarto build products
+_targets/
+paper_files/
+paper.knit.md
+paper.typ
+.quarto/
+paper.*

@@ -191,3 +191,12 @@ python analysis/orient_tvs.py --device cuda:0                         # all mode
 ```
 Axis-convention source: Mazza et al., BMJ Open 2021;11:e050785 (`pubs/e050785.full.pdf`), Figure 2 shows the DynaPort MM+
 (lower-back) device frame in its gravity-alignment test; it does not define the axes of the INDIP wrist module.
+
+## Paper draft (Quarto + targets)
+
+`paper.qmd` is the paper outline (intro, methods, results, discussion, further analyses). `_targets.R` + `R/functions.R` compute every table,
+figure and inline number from the cached results in `analysis/cache`; anything not produced yet shows as "TBD" / a "PENDING" placeholder.
+```bash
+Rscript -e 'targets::tar_make()'        # builds paper.pdf (Typst); re-run after copying new results into analysis/cache
+```
+Cluster side: `bash scripts/slurm/run_orient_pipeline.sh` queues the final fits, the TVS scoring, the CV and the leave-one-cohort-out runs.
