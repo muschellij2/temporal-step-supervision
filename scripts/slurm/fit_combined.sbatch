@@ -2,7 +2,7 @@
 # Combined Clemson+OxWalk model (NOT from the paper). Needs prep_oxwalk.sbatch first.
 # Quick smoke test (1 epoch):  EPOCHS=1 sbatch scripts/slurm/fit_combined.sbatch
 #SBATCH --job-name=tss_combined
-#SBATCH --partition=gpu
+#SBATCH --partition=bstgpu,bstgpu2,bstgpu3,gpu          # <-- only GPU workloads belong here
 #SBATCH --gres=gpu:l40s:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G

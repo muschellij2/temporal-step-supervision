@@ -12,7 +12,7 @@
 if [ "${BASH_SOURCE[0]}" != "$0" ]; then echo "Run with bash, do not source." >&2; return 1; fi
 set -euo pipefail
 file="${1:?usage: submit_gpu.sh <file.sbatch> [sbatch args]}"; shift
-PART="${PARTITION:-gpu}"
+PART="${PARTITION:-bstgpu,bstgpu2,bstgpu3,gpu}"   # same list as the #SBATCH --partition lines
 prefs="${GPU_TYPES:-l40s a100 h100}"
 
 all=$(sinfo -h -p "$PART" -o "%G" | tr ',' '\n' | grep -oiE 'gpu:[A-Za-z0-9_]+' | cut -d: -f2 | sort -u)

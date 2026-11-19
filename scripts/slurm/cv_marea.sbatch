@@ -4,7 +4,7 @@
 # data/marea/ (python scripts/prepare_marea.py) first.  Smoke test: EPOCHS=1 sbatch --array=0 scripts/slurm/cv_marea.sbatch
 #SBATCH --job-name=tss_cv_marea
 #SBATCH --array=0-4
-#SBATCH --partition=gpu
+#SBATCH --partition=bstgpu,bstgpu2,bstgpu3,gpu          # <-- only GPU workloads belong here
 #SBATCH --gres=gpu:l40s:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G

@@ -3,7 +3,7 @@
 # Smoke test (1 epoch):  EPOCHS=1 sbatch scripts/slurm/fit_all3.sbatch
 # Any of L40S/A100/H100:  bash scripts/slurm/submit_gpu.sh scripts/slurm/fit_all3.sbatch
 #SBATCH --job-name=tss_all3
-#SBATCH --partition=gpu
+#SBATCH --partition=bstgpu,bstgpu2,bstgpu3,gpu          # <-- only GPU workloads belong here
 #SBATCH --gres=gpu:l40s:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G

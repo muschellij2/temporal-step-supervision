@@ -4,7 +4,7 @@
 # Smoke test (1 epoch, 1 split, 1 rotation):  EPOCHS=1 ONLY=fold0 ROT=0 sbatch --array=0 scripts/slurm/orient.sbatch
 #SBATCH --job-name=tss_orient
 #SBATCH --array=0-4
-#SBATCH --partition=gpu
+#SBATCH --partition=bstgpu,bstgpu2,bstgpu3,gpu          # <-- only GPU workloads belong here
 #SBATCH --gres=gpu:l40s:1
 #SBATCH --cpus-per-task=6
 #SBATCH --mem=32G
