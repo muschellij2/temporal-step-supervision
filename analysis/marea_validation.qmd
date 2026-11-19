@@ -102,7 +102,8 @@ Markdown("\n".join([
 2. **Against the open-source algorithms on MAREA** (Koffman et al.), our models' walking count
    error is comparable to stepcount SSL/RF and better than Oak, ActiLife, ADEPT and Verisense
    (Section 6.2); SSL's published speed analysis suggests it handles running better than ours do.
-3. **Running: the models fail, and they were never asked to run.** Neither paper dataset contains
+3. **Running: the models fail, and they were never asked to run. Training on MAREA running fixes
+   it (held-out ~3 % MAPE, Section 9).** Neither paper dataset contains
    running: ~98 % of annotated training steps are below 140 steps/min, while ~79 % of MAREA running
    steps are above it, and running wrist amplitude is ~5–9× the walking amplitude the raster was
    calibrated to (Section 4). This is a domain-coverage limit, not evidence of a broken fit.
@@ -334,9 +335,10 @@ d.groupby(["model", "kind"])[["prec", "rec", "f1", "peak_prob", "median_offset_s
   probability at a true step is 0.73–0.75, so most steps do raise the probability well above 0.5.
   We have not established *why* event recall is lower than the peak probabilities suggest
   (merged runs and threshold effects are candidates).
-* **Running:** event precision/recall collapse (≤0.08 / ≤0.01) because above-threshold regions
-  merge across strides; mean peak probability at a true step is lower (0.40 `oxwalk`, 0.56–0.60
-  others). Mass counts are also low, so the model is under-confident, not just merging.
+* **Running:** the models miss steps rather than inventing them. Event precision stays high
+  (0.95–0.99) but recall is low (0.12 `oxwalk`, 0.32 `combined`, 0.36 `clemson`), and the mean peak
+  probability at a true step is 0.19 (`oxwalk`), 0.58 (`combined`) and 0.75 (`clemson`). The
+  undercount of Section 3 is therefore under-confidence at many steps, not merged detections.
 * **Timing:** among matched events the median offset from heel strike is small
   (|offset| ≤ 0.04 s), so there is no large systematic timing shift. Training labels are
   video-annotated steps (realigned for OxWalk), not foot-pressure heel strikes, so some small
@@ -619,22 +621,93 @@ Checked against `scripts/`, `step_counting/*/code`, and the paper's Appendix A (
   convergence checking, so the per-term logging added in this repo (`bce`, `count_mse`, `alpha`
   in `loss_log.csv` for new runs) is worth keeping.
 
-# 9. Conclusions
+# 9. Does training on running fix it? Cross-validation with MAREA in the training pool
+
+Everything above evaluates models that never saw MAREA. To test the obvious remedy we ran a
+**5-fold, participant-level cross-validation over all three cohorts** (`scripts/cv_with_marea.py`).
+Each fold holds out ~1/5 of Clemson (30 participants), OxWalk (39) and MAREA (19), keeping every
+recording of a participant on one side. Two arms use identical folds, seed and recipe (the
+`combined` recipe: 15 Hz, gravity-removed, label width 5, 120 epochs): **`no_marea`** trains on
+Clemson + OxWalk only; **`with_marea`** adds the MAREA training participants (all activities).
+Both are scored on the held-out participants of every cohort, so the contrast isolates what
+MAREA, including running, buys. Metric: per participant, steps summed over recordings, APE per
+participant, averaged (the Koffman convention); for MAREA, running and walking are scored separately.
+
+```{python}
+#| label: tbl-cv
+#| tbl-cap: "Held-out participants, 5-fold CV. MAPE % (participant-bootstrap 95% CI); MPE < 0 = undercount."
+import glob
+cvdir = CACHE / "cv_marea"
+files = sorted(glob.glob(str(cvdir / "*.csv")))
+if not files:
+    print("CV results not found (analysis/cache/cv_marea); run scripts/cv_with_marea.py on the cluster.")
+else:
+    c = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+    c["subset"] = np.where(c.cohort != "marea", c.cohort, np.where(c.activity.str.contains("run"), "MAREA running", "MAREA walking"))
+    pp = c.groupby(["arm", "subset", "subject"])[["true", "mass"]].sum().reset_index()
+    pp["pe"] = (pp.mass - pp.true) / pp.true * 100; pp["ape"] = pp.pe.abs()
+    def cvboot(g, n=2000):
+        a, e = g.ape.to_numpy(), g.pe.to_numpy(); i = RNG.integers(0, len(g), (n, len(g)))
+        return a.mean(), *np.percentile(a[i].mean(1), [2.5, 97.5]), e.mean()
+    rows = []
+    for sub in ["MAREA running", "MAREA walking", "clemson", "oxwalk"]:
+        r = {"held-out subset": sub, "n participants": pp[(pp["subset"] == sub) & (pp.arm == "with_marea")].shape[0]}
+        for arm in ["no_marea", "with_marea"]:
+            m, lo, hi, mpe = cvboot(pp[(pp["subset"] == sub) & (pp.arm == arm)])
+            r[f"{arm} MAPE"] = f"{m:.1f} [{lo:.1f}, {hi:.1f}]"; r[f"{arm} MPE"] = f"{mpe:+.1f}"
+        rows.append(r)
+    display(pd.DataFrame(rows))
+```
+
+```{python}
+#| label: fig-cv
+#| fig-cap: "Per-participant absolute percentage error on held-out participants (each dot a participant; bar = mean)."
+if files:
+    fig, axs = plt.subplots(1, 4, figsize=(12, 3.4), sharey=False)
+    for ax, sub in zip(axs, ["MAREA running", "MAREA walking", "clemson", "oxwalk"]):
+        for i, arm in enumerate(["no_marea", "with_marea"]):
+            v = pp[(pp["subset"] == sub) & (pp.arm == arm)].ape.to_numpy()
+            ax.scatter(np.full(len(v), i) + RNG.uniform(-.15, .15, len(v)), v, s=14, alpha=.6,
+                       color=["#999999", COL["combined"]][i])
+            ax.hlines(v.mean(), i - .3, i + .3, color="k", lw=2)
+        ax.set_xticks([0, 1]); ax.set_xticklabels(["no MAREA", "with MAREA"]); ax.set_title(sub, fontsize=10)
+        ax.set_xlim(-.6, 1.6)
+    axs[0].set_ylabel("participant APE (%)"); plt.tight_layout(); plt.show()
+```
+
+* **Running becomes countable once running is in training.** Held-out MAREA running goes from
+  about a 52 % undercount (`no_marea`, as for the three models above) to ~3 % MAPE (MPE ≈ +1 %)
+  with MAREA in training. Every one of the 19 held-out participants is within ~6 %, and indoor,
+  outdoor and treadmill running are all 2–4 %. That is the cadence/amplitude coverage story
+  of Section 4 confirmed by the direct remedy, not just by the Section 7 manipulations.
+* **Walking improves too** (MAREA walking ~9.5 % → ~5.7 %), and Clemson (5.0 → 4.3 %) and OxWalk
+  (15.1 → 14.4 %) do not get worse, so one model can serve all three regimes. Walking has a heavier
+  tail than running: a few participants (marea_03, _10, _12) are 19–24 % low, and one fold
+  averages 13 % on walking.
+* **Limits.** All running comes from MAREA's 19 people on three surfaces (135–177 steps/min), so
+  the estimate is for similar participants, not for other running populations, devices or wrist
+  placements. These CV models differ from the shipped `final_all3` (which sees every participant
+  and has no held-out estimate of its own; expect its accuracy to be like the CV numbers).
+  These numbers are **not** comparable to Section 6.2: Koffman's algorithms were not trained on MAREA.
+
+# 10. Conclusions
 
 1. **The models are in line with the paper in the way that can be tested here.** On steady
    walking at an unseen sensor/protocol, error (~6–15 % MAPE, mild undercount) is within the
    paper's zero-shot range, and the in-sample counts reproduce well.
-2. **Running is a hard failure and is out of scope for the paper.** Training cadences do not
-   cover running (a cadence-only manipulation recovers about half of the undercount), and other
-   waveform differences contribute; every model undercounts severely, `oxwalk` worst. Do not use these models
-   for running without retraining on running data, and say so when reporting results.
+2. **Running is a hard failure of the paper's models, and is fixed by training on running data.**
+   Training cadences do not cover running (a cadence-only manipulation recovers about half of the
+   undercount); every paper-trained model undercounts severely, `oxwalk` worst. Do not use
+   `clemson`/`oxwalk`/`combined` for running. Section 9 shows that adding MAREA to training
+   brings held-out running to ~3 % MAPE without hurting walking, so use the three-cohort model
+   (`all3`) when running matters, and validate it on running from a different population.
 3. **No large fitting error was found.** Hyperparameters, losses, preprocessing and label setup
    match the paper. The notable departures are protocol-level (no validation-based checkpoint
    for OxWalk; all participants used for training) and the paper/code inconsistencies above.
 4. **Recommended next steps.**
    * Re-fit with a held-out split for OxWalk to measure the final-epoch vs validation-selected gap.
-   * If running or fast walking matters, add running data (e.g. MAREA itself, held-out by
-     participant); a larger raster range alone is untested and may not help.
+   * Running data is the fix (Section 9). Next: validate `all3` on running from a different
+     population/device, since all running here comes from 19 MAREA participants.
    * Versus the open-source tools: stepcount SSL matches our count accuracy on MAREA walking,
      recognises walking seconds better, and appears to cope with running better; closing that
      gap likely needs more diverse training data (SSL pretrains on UK Biobank), not more epochs.

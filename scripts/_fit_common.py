@@ -39,15 +39,17 @@ def save_ranges(out, vmins, vmaxs):
     pd.DataFrame({"channel": range(len(vmins)), "vmin": vmins, "vmax": vmaxs}).to_csv(Path(out) / "bin_ranges.csv", index=False)
 
 
-def fit(model, X, y, c, subj_ids, criterion, device, out, epochs=EPOCHS, num_workers=4):
-    """X:(N,H,T,C) uint8, y:(N,T), c:(N,n_chunks), subj_ids:(N,) ints. Saves model.pt + loss_log.csv."""
+def fit(model, X, y, c, subj_ids, criterion, device, out, epochs=EPOCHS, num_workers=4, dataset=None):
+    """X:(N,H,T,C) uint8, y:(N,T), c:(N,n_chunks), subj_ids:(N,) ints. Saves model.pt + loss_log.csv.
+    `dataset` (optional) replaces StepDataset(X, y, c, subj_ids); then X/y/c may be None (used by the
+    on-the-fly raster pipeline in step_counting/orient_model.py). subj_ids still drives the sampler."""
     out = Path(out)
     counts = Counter(subj_ids.tolist())
     w = np.asarray([1.0 / counts[s] for s in subj_ids], dtype=np.float64)
     sampler = WeightedRandomSampler(torch.as_tensor(w / w.sum(), dtype=torch.double), len(w), replacement=True)
-    loader = DataLoader(StepDataset(X, y, c, subj_ids), batch_size=BATCH, sampler=sampler, shuffle=False,
+    loader = DataLoader(dataset if dataset is not None else StepDataset(X, y, c, subj_ids), batch_size=BATCH, sampler=sampler, shuffle=False,
                         num_workers=num_workers, pin_memory=device.type == "cuda")
-    print(f"Windows={len(X)} X={X.shape} subjects={len(counts)} params={sum(p.numel() for p in model.parameters()):,}")
+    print(f"Windows={len(subj_ids)} X={None if X is None else X.shape} subjects={len(counts)} params={sum(p.numel() for p in model.parameters()):,}")
 
     opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=WD)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(1, epochs), eta_min=ETA_MIN)

@@ -152,9 +152,9 @@ Step Counting from Wearable Accelerometers.
 
 ## Predicting with the final models
 
-`runs/final_{clemson,oxwalk,combined}` hold the final weights. `step_counting/inference.py`
+`runs/final_{clemson,oxwalk,combined,all3}` hold the final weights. **`all3`** (Clemson + OxWalk + MAREA, `scripts/fit_final_all3.py`) is the one to use if running matters: the paper-trained models undercount running by ~50 %, while held-out cross-validation with MAREA in training gives ~3 % MAPE on running (`scripts/cv_with_marea.py`, `analysis/cv_marea_summary.py`). `step_counting/inference.py`
 wraps them so you only supply wrist accelerometer data (x,y,z in g) at any sampling rate;
-resampling (15 Hz for clemson/combined, 25 Hz for oxwalk), gravity removal, the saved raster
+resampling (15 Hz for clemson/combined/all3, 25 Hz for oxwalk), gravity removal, the saved raster
 ranges and 60 s windowing are applied automatically.
 
 ```python
@@ -166,3 +166,22 @@ res.step_count, res.step_times_s, res.prob
 python scripts/predict.py recording.csv --model combined --fs 30 --out preds.csv
 ```
 Axis/orientation conventions are not corrected, so wrist placement should resemble the training data.
+
+## Orientation robustness (axes differ between sensors)
+
+The models read raw x/y/z, so a sensor whose axes are mounted or labelled differently is out-of-distribution
+(one Mobilise-D right-wrist person: -31 % as-is, ~0 % after the right axis permutation).
+`step_counting/orient.py` defines the 24 axis-aligned proper rotations (cube rotation group: identity, 6 quarter-turns,
+3 face half-turns, 6 edge half-turns, 8 vertex 120-deg turns; `python step_counting/orient.py` prints them) and their
+24 mirror images (left vs right wrist). Five arms (`step_counting/orient_model.py`): `xyz` (control), `xyz_rot`
+(rotation augmentation), `vm` (vector magnitude only), `xyz_vm_drop` (xyz + vm with xyz channel dropout),
+`xyz_vm_rot` (xyz + vm + rotation augmentation).
+
+```bash
+python tests/check_orient_parity.py                                   # no-model checks (rasters identical to build_windows)
+bash scripts/slurm/submit_gpu.sh scripts/slurm/orient.sbatch          # cv + leave-one-cohort-out + full, all arms (5 array tasks)
+python analysis/orient_external.py --device cpu                       # Mobilise-D right wrist under 24 rotations (needs the 'full' models)
+python analysis/orient_summary.py                                     # tables + analysis/orient_summary_*.png
+```
+Axis-convention source: Mazza et al., BMJ Open 2021;11:e050785 (`pubs/e050785.full.pdf`), Figure 2 shows the DynaPort MM+
+(lower-back) device frame in its gravity-alignment test; it does not define the axes of the INDIP wrist module.
