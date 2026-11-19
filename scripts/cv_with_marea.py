@@ -55,8 +55,12 @@ def load_marea_15hz():
         raw = pd.read_csv(ROOT / "data/marea" / r.file)[["x", "y", "z"]].to_numpy(np.float64)
         x = resample_poly(raw, 15, 128, axis=0).astype(np.float32)
         x = preprocess_xyz(x, 15, "gravity_only")
-        e = ev[(ev.subject == r.subject) & (ev.activity == r.activity)].time_s.to_numpy()
-        e = np.unique(np.clip(np.round(e * 15).astype(np.int64), 0, len(x) - 1))
+        # Use the in-recording SAMPLE index. (events.csv time_s from an older prepare_marea.py is NOT
+        # restarted for *_run recordings: it is offset by the preceding walk, which silently dropped
+        # nearly all running labels.)
+        e = ev[(ev.subject == r.subject) & (ev.activity == r.activity)]["sample"].to_numpy()
+        e = np.unique(np.clip(np.round(e * 15 / 128).astype(np.int64), 0, len(x) - 1))
+        assert abs(len(e) - r.n_steps) <= 0.02 * r.n_steps + 2, (r.file, len(e), r.n_steps)  # catches label loss
         recs.append(dict(subject=f"marea_{r.subject:02d}", condition=r.activity, sensor="wrist", xyz=x,
                          events=e, length=len(x), source=r.file, cohort="marea"))
     return recs

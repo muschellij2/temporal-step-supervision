@@ -49,7 +49,7 @@ def main():
         rec.to_csv(path, index=False)
         hs = g[g.ind_step == 1]
         for i, r in hs.iterrows():
-            events.append((sid, act, i, r.tm_time_s, str(r.cat_step_type).replace("_heelstrike", "")))
+            events.append((sid, act, i, i / fs, str(r.cat_step_type).replace("_heelstrike", "")))
         manifest.append(dict(subject=sid, activity=act, group=g.cat_activity_large.iloc[0],
                              file=str(path.relative_to(out)), fs=fs, n_samples=len(g),
                              duration_s=round(len(g) / fs, 3), n_steps=len(hs),
