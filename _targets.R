@@ -47,6 +47,8 @@ list(
   tar_target(tab_oracle_main, tab_oracle(rot)),
   tar_target(fig_oracle_main, fig_oracle(rot)),
   tar_target(tab_tta_tvs_main, tab_tta_tvs(rot)),
+  tar_target(tab_subset_tvs_main, tab_subset_tvs(rot)),
+  tar_target(tab_subset_cv_main,  tab_subset_cv(orient_cv)),
   tar_target(tab_tta_cv,     tab_tta(orient_cv)),
   tar_target(tab_tta_loco,   tab_tta(orient_loco)),
 

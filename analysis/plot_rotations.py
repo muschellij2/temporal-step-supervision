@@ -25,7 +25,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from step_counting.orient import ALL_ROTS, describe  # noqa: E402
+from step_counting.orient import ALL_ROTS, describe, subset_ids  # noqa: E402
 
 AXIS_COL = {"x": "#d62728", "y": "#2ca02c", "z": "#1f77b4"}   # x red, y green, z blue (labelled, not colour-alone)
 INK, MUTED, BODY, SCREEN = "#1b1b1b", "#6b6b6b", "#b9bec7", "#e9edf3"
@@ -90,14 +90,24 @@ def main():
     a = ap.parse_args()
     ids = range(24, 48) if a.mirror else range(24)
     fig = plt.figure(figsize=(15, 11.4), facecolor="white")
+    axes = []
     for n, i in enumerate(ids):
-        panel(fig.add_subplot(4, 6, n + 1, projection="3d", computed_zorder=False), i)
+        axes.append(fig.add_subplot(4, 6, n + 1, projection="3d", computed_zorder=False)); panel(axes[-1], i)
     what = "mirror images (left <-> right wrist, improper)" if a.mirror else "proper rotations (the sensor turned in space)"
     fig.suptitle(f"The 24 axis-aligned {what}", fontsize=14, color=INK, y=0.995)
     fig.text(0.5, 0.012, "Arrows = model channels x (red), y (green), z (blue), fixed. Grey slab = sensor: bright face = screen (+z), dark triangle = points to +y end, "
              "stub = -y end.\nUnder each panel: new channel = ±old channel (o) — the rotation's signed permutation.",
              ha="center", fontsize=9, color=MUTED)
-    fig.subplots_adjust(left=0.01, right=0.99, top=0.94, bottom=0.07, wspace=0.0, hspace=0.22)
+    fig.subplots_adjust(left=0.01, right=0.99, top=0.94, bottom=0.085, wspace=0.0, hspace=0.22)
+    p8, p16 = set(subset_ids("placement8")), set(subset_ids("placement16"))
+    for ax, i in zip(axes, ids):          # frame = physically plausible placement of a flat wrist device
+        col = "#2a9d8f" if i in p8 else "#e9a23b" if i in p16 else None
+        if col:
+            pos = ax.get_position()
+            fig.patches.append(plt.Rectangle((pos.x0, pos.y0 + 0.095 * pos.height), pos.width, 0.905 * pos.height, transform=fig.transFigure, fill=False, ec=col, lw=3.2))
+    fig.text(0.5, 0.037, "Frame: green = placement-8 (flipped over / turned round / both, x left-right mirror); orange = added in placement-16 "
+             "(in-plane x<->y swaps = vendor axis conventions); no frame = not a plausible placement of a flat wrist device.",
+             ha="center", fontsize=9, color=INK)
     out = ROOT / "analysis" / ("orient_rotations_mirror.png" if a.mirror else "orient_rotations.png")
     fig.savefig(out, dpi=140)
     print("wrote", out)

@@ -8,12 +8,17 @@ suppressPackageStartupMessages({
 CACHE <- "analysis/cache"
 MODELS3 <- c("clemson", "combined", "oxwalk")
 TVS_MODELS <- c("clemson", "oxwalk", "combined", "all3",
-                "orient_xyz", "orient_xyz_vm", "orient_xyz_mirror", "orient_xyz_vm_mirror", "orient_xyz_rot")
+                "orient_xyz", "orient_xyz_vm", "orient_xyz_mirror", "orient_xyz_vm_mirror", "orient_xyz_rot",
+                "orient_xyz_place8", "orient_xyz_vm_place8", "orient_xyz_place16", "orient_xyz_vm_place16")
 ARM_LAB <- c(clemson = "clemson (original recipe)", oxwalk = "oxwalk (original recipe)", combined = "combined (Clemson+OxWalk)",
              all3 = "all3 (Clemson+OxWalk+MAREA)",
              orient_xyz = "xyz (no VM, no augmentation)", orient_xyz_vm = "xyz + VM (no augmentation)",
              orient_xyz_mirror = "xyz + rotation/mirror aug (no VM)", orient_xyz_vm_mirror = "xyz + VM + rotation/mirror aug",
              orient_xyz_rot = "xyz + 24-rotation aug (no VM)",
+             orient_xyz_place8 = "xyz + placement-8 aug", orient_xyz_vm_place8 = "xyz + VM + placement-8 aug",
+             orient_xyz_place16 = "xyz + placement-16 aug", orient_xyz_vm_place16 = "xyz + VM + placement-16 aug",
+             xyz_place8 = "xyz + placement-8 aug", xyz_vm_place8 = "xyz + VM + placement-8 aug",
+             xyz_place16 = "xyz + placement-16 aug", xyz_vm_place16 = "xyz + VM + placement-16 aug",
              xyz = "xyz (no VM, no augmentation)", xyz_vm = "xyz + VM (no augmentation)",
              xyz_mirror = "xyz + rotation/mirror aug (no VM)", xyz_vm_mirror = "xyz + VM + rotation/mirror aug",
              xyz_rot = "xyz + 24-rotation aug (no VM)", vm = "VM only", xyz_vm_drop = "xyz+VM, xyz dropout",
@@ -393,4 +398,53 @@ tab_tta_tvs <- function(r) {   # r: TVS sweep (model, rot, id, wrist, true, bout
   v %>% part_level(c("model", "variant")) %>% summ_metric(c("model", "variant")) %>%
     mutate(model = factor(model, TVS_MODELS), variant = factor(variant, TTA_VARIANTS)) %>% arrange(model, variant) %>%
     mutate(across(c(model, variant), as.character))
+}
+
+# ---------------------------------------------------------------------------------------------- plausible-placement subsets
+# placement8 = 180-degree turns (flipped over / turned round / both) x left-right mirror; placement16 adds the in-plane x<->y swaps
+# (vendor axis conventions); see step_counting/orient.py (subset_ids). R/rot_subsets.csv is written by `python step_counting/orient.py --write-subsets`.
+rot_subset_ids <- function() {
+  s <- read_csv("R/rot_subsets.csv", show_col_types = FALSE)
+  list(placement8 = s$id[s$placement8 == 1], placement16 = s$id[s$placement16 == 1], proper24 = 0:23, all48 = 0:47)
+}
+SUBSET_LAB <- c(placement8 = "placement-8", placement16 = "placement-16", proper24 = "24 rotations", all48 = "all 48")
+
+tab_subset_tvs <- function(r) {
+  sk <- expand_grid(model = TVS_MODELS, subset = names(SUBSET_LAB)) %>%
+    mutate(as_recorded = NA_real_, top3 = NA_real_, max = NA_real_, best_single = NA_real_, best_rot = NA_real_)
+  if (is.null(r)) return(sk)
+  ids <- rot_subset_ids()
+  pm <- function(d, col) d %>% mutate(subject = id, mass = .data[[col]]) %>% part_level(c("model", "variant", "subset")) %>%
+    group_by(model, subset, variant) %>% summarise(MAPE = mean(ape), .groups = "drop")
+  ens <- imap_dfr(ids, function(rs, nm) r %>% filter(rot %in% rs) %>% group_by(model, id, wrist, test, trial, true) %>%
+    summarise(top3 = mean(sort(bout, decreasing = TRUE)[1:min(3, n())]), max = max(bout), .groups = "drop") %>%
+    pivot_longer(c(top3, max), names_to = "variant", values_to = "bout") %>% mutate(subset = nm)) %>%
+    mutate(subject = id, mass = bout) %>% part_level(c("model", "subset", "variant")) %>%
+    group_by(model, subset, variant) %>% summarise(MAPE = mean(ape), .groups = "drop") %>% pivot_wider(names_from = variant, values_from = MAPE)
+  rec <- r %>% filter(rot == 0) %>% mutate(subject = id, mass = bout) %>% part_level("model") %>% group_by(model) %>% summarise(as_recorded = mean(ape))
+  pr <- r %>% mutate(subject = id, mass = bout) %>% part_level(c("model", "rot")) %>% group_by(model, rot) %>% summarise(M = mean(ape), .groups = "drop")
+  orc <- imap_dfr(ids, function(rs, nm) pr %>% filter(rot %in% rs) %>% group_by(model) %>% slice_min(M, n = 1, with_ties = FALSE) %>%
+                    transmute(model, subset = nm, best_single = M, best_rot = rot))
+  ens %>% left_join(rec, by = "model") %>% left_join(orc, by = c("model", "subset")) %>%
+    mutate(model = factor(model, TVS_MODELS), subset = factor(subset, names(SUBSET_LAB))) %>% arrange(model, subset) %>%
+    mutate(across(c(model, subset), as.character)) %>% select(model, subset, as_recorded, top3, max, best_single, best_rot)
+}
+
+tab_subset_cv <- function(d, arms = c("xyz", "xyz_vm", "xyz_mirror", "xyz_vm_mirror")) {
+  sk <- expand_grid(arm = arms, subset = c("All cohorts", "OxWalk wrist", "MAREA running"), rot_set = names(SUBSET_LAB)) %>%
+    mutate(as_recorded = NA_real_, mean = NA_real_, top3 = NA_real_, max = NA_real_)
+  if (is.null(d)) return(sk)
+  ids <- rot_subset_ids(); key <- c("arm", "cohort", "subject", "activity", "true")
+  d <- d %>% filter(arm %in% arms)
+  ens <- imap_dfr(ids, function(rs, nm) d %>% filter(rot %in% rs) %>% group_by(across(all_of(key))) %>%
+    summarise(mean = mean(mass), top3 = mean(sort(mass, decreasing = TRUE)[1:min(3, n())]), max = max(mass), .groups = "drop") %>%
+    mutate(rot_set = nm))
+  rec <- d %>% filter(rot == 0) %>% select(all_of(key), as_recorded = mass)
+  full <- ens %>% left_join(rec, by = key)
+  long <- full %>% pivot_longer(c(as_recorded, mean, top3, max), names_to = "variant", values_to = "mass")
+  sub <- bind_rows(long %>% mutate(subset = "All cohorts"), long %>% filter(cohort == "oxwalk") %>% mutate(subset = "OxWalk wrist"),
+                   long %>% filter(cohort == "marea", str_detect(activity, "run")) %>% mutate(subset = "MAREA running"))
+  sub %>% part_level(c("arm", "subset", "rot_set", "variant")) %>% group_by(arm, subset, rot_set, variant) %>% summarise(MAPE = mean(ape), .groups = "drop") %>%
+    pivot_wider(names_from = variant, values_from = MAPE) %>%
+    mutate(arm = factor(arm, arms), rot_set = factor(rot_set, names(SUBSET_LAB))) %>% arrange(arm, subset, rot_set) %>% mutate(across(c(arm, rot_set), as.character))
 }

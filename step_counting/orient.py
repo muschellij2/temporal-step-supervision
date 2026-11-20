@@ -54,6 +54,26 @@ PROPER = _build()                       # (24, 3, 3), PROPER[0] == identity
 ALL_ROTS = np.concatenate([PROPER, -PROPER])   # (48, 3, 3); ids 24-47 are mirror images
 
 
+# ---------------------------------------------------------------------------------------------- physically plausible subsets
+# A flat wrist device (ActiGraph, Axivity AX3, GENEActiv, ...) is not worn at 90 or 120 degrees, but it can be worn on either wrist, flipped over
+# (face towards the skin), or turned round (crown towards the elbow), or both. Taking z as the face normal:
+#   "placement8"  the 8 sign flips diag(+-1,+-1,+-1): identity, the three 180-degree turns (flipped over / turned round / both) and
+#                 the 4 mirror images (other wrist). Independent of which axis is called the normal (the sign flips are a normal subgroup).
+#   "placement16" placement8 plus swapping/negating the two IN-PLANE axes (the 8 signed permutations that keep z = +-z): covers the case
+#                 where vendors put x and y on different edges (a convention difference, not a placement), e.g. a 90-degree turn about z.
+# The remaining mappings (axis permutations that move the face normal, 120-degree turns) are not plausible placements of a flat device.
+def subset_ids(name):
+    if name == "placement8":
+        return [i for i in range(48) if np.allclose(ALL_ROTS[i], np.diag(np.diag(ALL_ROTS[i])))]
+    if name == "placement16":
+        return [i for i in range(48) if np.allclose(np.abs(ALL_ROTS[i][2]), [0, 0, 1])]
+    if name in ("all24", "proper24"):
+        return list(range(24))
+    if name == "all48":
+        return list(range(48))
+    raise ValueError(name)
+
+
 def rotate(x, R):
     """(..., 3) -> (..., 3) using x_new = x @ R.T."""
     return np.asarray(x) @ np.asarray(R, dtype=np.asarray(x).dtype).T
@@ -90,6 +110,12 @@ def rotation_table(mirror=False):
 
 
 if __name__ == "__main__":
+    import sys
+    if "--write-subsets" in sys.argv:        # R/rot_subsets.csv for the R pipeline
+        import pathlib
+        rows = ["id,mirrored,placement8,placement16"] + [f"{i},{int(i >= 24)},{int(i in subset_ids('placement8'))},{int(i in subset_ids('placement16'))}" for i in range(48)]
+        pathlib.Path(__file__).resolve().parents[1].joinpath("R", "rot_subsets.csv").write_text("\n".join(rows) + "\n"); print("wrote R/rot_subsets.csv")
+        sys.exit()
     for d in rotation_table(mirror=True):
         print(f"{d['id']:2d}  {'mirror' if d['mirrored'] else 'proper'}  {d['kind']:<18s} {d['angle_deg']:>3d} deg  "
-              f"axis={d['axis']}   {d['mapping']}")
+              f"axis={d['axis']}   {d['mapping']}" + ("   [placement8]" if d['id'] in subset_ids('placement8') else "   [placement16]" if d['id'] in subset_ids('placement16') else ""))

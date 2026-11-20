@@ -8,6 +8,8 @@ Arms (all use the `combined` recipe: 15 Hz, gravity-removed, label width 5, Step
                so the net must also count from vm alone. Scored with xyz ("full") and with xyz zeroed ("vm_only").
   xyz_vm_rot   xyz + vm channels + random rotation augmentation
   xyz_vm       xyz + vm channels, NO augmentation, NO dropout (isolates what adding VM alone does)
+  xyz_place8 / xyz_vm_place8 / xyz_place16 / xyz_vm_place16   augmentation restricted to plausible placements of a flat wrist device
+               (8 sign flips = 180-degree turns x mirror; 16 adds the in-plane x<->y swaps)
   xyz_mirror / xyz_vm_mirror   the same two but augmented with all 48 signed permutations (24 rotations + 24 mirrors)
   (rot_aug True = 24 proper rotations; "all" = 48 incl. mirrors.) The augmentation is TRAINING-ONLY: at test time the
   recording is scored as-is (identity), no rotation is chosen.
@@ -30,7 +32,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from step_counting.orient import ALL_ROTS, PROPER, rotate, vm
+from step_counting.orient import ALL_ROTS, PROPER, rotate, subset_ids, vm
 
 FS, WINDOW_SEC, H, LABEL_WIDTH = 15, 60, 16, 5
 SPW = FS * WINDOW_SEC  # 900
@@ -48,7 +50,23 @@ ARMS = {
     # VM added next to xyz, no augmentation and no dropout: completes the 2x2 {VM channel} x {rotation/mirror augmentation}
     #   xyz (neither) | xyz_vm (VM only) | xyz_mirror (augmentation only) | xyz_vm_mirror (both)
     "xyz_vm":         dict(xyz=True,  vm=True,  rot_aug=False, xyz_drop=0.0),
+    # augmentation restricted to physically plausible placements of a flat wrist device (step_counting/orient.py: subset_ids):
+    #   place8  = 180-degree turns (flipped over / turned round / both) x left-right mirror (8 mappings)
+    #   place16 = place8 + the in-plane x<->y swaps with signs (vendor axis conventions, 90-degree turns about the normal)
+    "xyz_place8":     dict(xyz=True,  vm=False, rot_aug="place8",  xyz_drop=0.0),
+    "xyz_vm_place8":  dict(xyz=True,  vm=True,  rot_aug="place8",  xyz_drop=0.0),
+    "xyz_place16":    dict(xyz=True,  vm=False, rot_aug="place16", xyz_drop=0.0),
+    "xyz_vm_place16": dict(xyz=True,  vm=True,  rot_aug="place16", xyz_drop=0.0),
 }
+
+
+def aug_pool(rot_aug):
+    """(M,3,3) matrices one training window is drawn from."""
+    if rot_aug == "all":
+        return ALL_ROTS
+    if rot_aug in ("place8", "place16"):
+        return ALL_ROTS[subset_ids({"place8": "placement8", "place16": "placement16"}[rot_aug])]
+    return PROPER
 
 
 def n_channels(arm):
@@ -141,6 +159,7 @@ class OrientDataset(Dataset):
     def __init__(self, sig, y, c, sid, arm, ranges, train=True):
         self.sig, self.y, self.c, self.sid = sig, y, c, np.asarray(sid, np.int64)
         self.arm, self.cfg, self.train = arm, ARMS[arm], train
+        self.pool = aug_pool(self.cfg["rot_aug"]) if self.cfg["rot_aug"] else None
         self.vmins, self.vmaxs = channel_ranges(arm, ranges)
 
     def __len__(self):
@@ -149,8 +168,7 @@ class OrientDataset(Dataset):
     def __getitem__(self, i):
         x = self.sig[i]
         if self.train and self.cfg["rot_aug"]:
-            pool = ALL_ROTS if self.cfg["rot_aug"] == "all" else PROPER
-            x = rotate(x, pool[int(torch.randint(len(pool), (1,)))])        # torch RNG is seeded per worker
+            x = rotate(x, self.pool[int(torch.randint(len(self.pool), (1,)))])  # torch RNG is seeded per worker
         img = torch.from_numpy(rasterize(make_channels(x, self.arm), self.vmins, self.vmaxs)).permute(2, 0, 1).float()
         if self.train and self.cfg["xyz_drop"] > 0 and float(torch.rand(1)) < self.cfg["xyz_drop"]:
             img[:3] = 0.0
