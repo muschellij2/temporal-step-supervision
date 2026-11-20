@@ -18,6 +18,8 @@ list(
   tar_target(stamp_manifest, input_stamp("data/mobilised_tvs/manifest.csv"), cue = tar_cue("always")),
   tar_target(stamp_tvs,      input_stamp(file.path(CACHE, c("orient_tvs_participants.csv", "orient_tvs_recordings.csv"))), cue = tar_cue("always")),
   tar_target(stamp_orient,   glob_stamp(file.path(CACHE, "orient"), "\\.csv$"), cue = tar_cue("always")),
+  tar_target(stamp_cohort,   input_stamp(file.path(CACHE, "cohort_protocols.csv")), cue = tar_cue("always")),
+  tar_target(stamp_fuller,   glob_stamp(file.path(CACHE, "orient_fuller"), "^cv_.*\\.csv$"), cue = tar_cue("always")),
   tar_target(stamp_rot,      glob_stamp(CACHE, "^orient_tvs_rotations_.*\\.csv$"), cue = tar_cue("always")),
 
   # ---- MAREA: original clemson / oxwalk / combined models, as-is
@@ -60,11 +62,18 @@ list(
   tar_target(fig_orient_cv,  fig_orient(orient_cv, "Orientation CV")),
   tar_target(fig_orient_loco, fig_orient(orient_loco, "Orientation leave-one-cohort-out")),
 
+  # ---- cohort protocols and the fuller 4-cohort models (place8 / place16, trained on Clemson + OxWalk + MAREA + TVS)
+  tar_target(cohort_stats,   load_cohort_stats(stamp_cohort)),
+  tar_target(tab_cohort,     tab_cohort_numbers(cohort_stats)),
+  tar_target(fuller,         load_fuller(stamp_fuller)),
+  tar_target(tab_fuller_main, tab_fuller(fuller)),
+  tar_target(fig_fuller_main, fig_fuller(fuller)),
+
   # ---- bookkeeping + scalars for inline prose
   tar_target(tab_status_main, tab_status(stamp_marea, stamp_koffman, stamp_cv, stamp_manifest, stamp_tvs,
                                          glob_stamp(file.path(CACHE, "orient"), "^cv_.*\\.csv$"),
                                          glob_stamp(file.path(CACHE, "orient"), "^loco_.*\\.csv$"),
-                                         glob_stamp(CACHE, "^orient_tvs_rotations_.*\\.csv$"))),
+                                         glob_stamp(CACHE, "^orient_tvs_rotations_.*\\.csv$"), stamp_cohort, stamp_fuller)),
   tar_target(vals, make_vals(marea, tab_marea_main, tab_run_share, tab_cv_main, tab_tvs_description,
                              tab_tvs_models, tab_tvs_wrist, tab_orient_cv, tab_orient_loco)),
 

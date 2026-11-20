@@ -64,9 +64,10 @@ subset_defs <- function(d) {
     d %>% filter(cohort == "marea", !run) %>% mutate(subset = "MAREA walking"),
     d %>% filter(cohort == "marea", run) %>% mutate(subset = "MAREA running"),
     d %>% filter(cohort == "marea") %>% mutate(subset = "MAREA walking + running"),
-    d %>% mutate(subset = "All cohorts"))
+    d %>% mutate(subset = "All cohorts"),
+    d %>% filter(cohort == "tvs") %>% mutate(subset = "TVS"))
 }
-SUBSETS <- c("Clemson wrist", "OxWalk wrist", "MAREA walking", "MAREA running", "MAREA walking + running", "All cohorts")
+SUBSETS <- c("Clemson wrist", "OxWalk wrist", "MAREA walking", "MAREA running", "MAREA walking + running", "All cohorts", "TVS")
 
 # ---------------------------------------------------------------------------------------------- MAREA (original models)
 load_marea <- function(stamp) {
@@ -249,11 +250,11 @@ tab_status <- function(...) {
   s <- list(...)
   tibble(
     result = c("MAREA validation of clemson / oxwalk / combined", "Koffman et al. per-participant totals", "Held-out CV with MAREA (all3 recipe)",
-               "Mobilise-D TVS conversion (manifest)", "TVS scoring of all models", "Orientation arms: 5-fold CV", "Orientation arms: leave-one-cohort-out", "TVS oracle axis-swap sweep (48 mappings)"),
+               "Mobilise-D TVS conversion (manifest)", "TVS scoring of all models", "Orientation arms: 5-fold CV", "Orientation arms: leave-one-cohort-out", "TVS oracle axis-swap sweep (48 mappings)", "Cohort protocol statistics", "Fuller model (4 cohorts): 5-fold CV"),
     produced_by = c("python analysis/marea_eval.py", "Rscript analysis/fetch_koffman_marea.R", "scripts/slurm/cv_marea.sbatch",
                     "python scripts/prepare_mobilised_tvs.py", "scripts/slurm/run_orient_pipeline.sh (stage 2)",
                     "run_orient_pipeline.sh (stage 3)", "run_orient_pipeline.sh (stage 4)",
-                    "scripts/slurm/orient_tvs_oracle.sbatch"),
+                    "scripts/slurm/orient_tvs_oracle.sbatch", "python analysis/cohort_protocols.py", "scripts/slurm/orient_fuller.sbatch"),
     files_found = map_int(s, ~ length(.x$files)),
     status = if_else(files_found > 0, "available", "pending"))
 }
@@ -447,4 +448,49 @@ tab_subset_cv <- function(d, arms = c("xyz", "xyz_vm", "xyz_mirror", "xyz_vm_mir
   sub %>% part_level(c("arm", "subset", "rot_set", "variant")) %>% group_by(arm, subset, rot_set, variant) %>% summarise(MAPE = mean(ape), .groups = "drop") %>%
     pivot_wider(names_from = variant, values_from = MAPE) %>%
     mutate(arm = factor(arm, arms), rot_set = factor(rot_set, names(SUBSET_LAB))) %>% arrange(arm, subset, rot_set) %>% mutate(across(c(arm, rot_set), as.character))
+}
+
+# ---------------------------------------------------------------------------------------------- cohort protocols + the "fuller" (4-cohort) models
+load_cohort_stats <- function(stamp) { if (!length(stamp$files)) return(NULL); read_csv(stamp$files[1], show_col_types = FALSE) }
+tab_cohort_numbers <- function(cs) {
+  rows <- c("Participants" = "participants", "Recordings" = "recordings", "Hours" = "hours", "Reference steps" = "steps", "Median recording, s" = "median_recording_s",
+            "Share of time walking" = "walking_fraction", "Median cadence, steps/min" = "cadence_median", "Cadence 5th-95th pct" = NA,
+            "Steps above 140 steps/min" = "cadence_gt140", "Gravity x, g" = "gravity_x", "Gravity y, g" = "gravity_y", "Gravity z, g" = "gravity_z",
+            "Walking SD, vector magnitude, g" = "walk_sd_vm", "Walking 99.5th pct |a|, g" = "p995_abs")
+  cohorts <- c(clemson = "Clemson", oxwalk = "OxWalk", marea = "MAREA", tvs = "TVS")
+  if (is.null(cs)) return(tibble(Metric = names(rows)) %>% bind_cols(as_tibble(setNames(rep(list(NA_character_), 4), unname(cohorts)))))
+  fmt <- function(col, x) if (col %in% c("walking_fraction", "cadence_gt140")) sprintf("%.0f%%", 100 * x) else if (col %in% c("participants", "recordings", "steps", "median_recording_s")) format(round(x), big.mark = ",") else sprintf("%.2f", x)
+  map_dfr(names(rows), function(m) {
+    col <- rows[[m]]
+    vals <- map_chr(names(cohorts), function(c) {
+      r <- filter(cs, cohort == c)
+      if (is.na(col)) sprintf("%.0f-%.0f", r$cadence_p5, r$cadence_p95) else fmt(col, r[[col]])
+    })
+    tibble(Metric = m) %>% bind_cols(as_tibble(setNames(as.list(vals), unname(cohorts))))
+  })
+}
+
+load_fuller <- function(stamp) {
+  f <- stamp$files
+  if (!length(f)) return(NULL)
+  map_dfr(f, read_csv, show_col_types = FALSE) %>% add_pe()
+}
+FULLER_ARMS <- c("xyz_place8", "xyz_place16")
+FULLER_SUBSETS <- c("Clemson wrist", "OxWalk wrist", "MAREA walking", "MAREA running", "TVS")
+tab_fuller <- function(d) {
+  sk <- expand_grid(arm = FULLER_ARMS, subset = FULLER_SUBSETS) %>%
+    mutate(n = NA_integer_, MAPE = NA_real_, SD = NA_real_, MAPE_lo = NA_real_, MAPE_hi = NA_real_, MPE = NA_real_, bias_steps = NA_real_)
+  if (is.null(d)) return(sk)
+  subset_defs(d) %>% filter(subset %in% FULLER_SUBSETS) %>% part_level(c("arm", "subset")) %>% summ_metric(c("arm", "subset")) %>%
+    mutate(arm = factor(arm, FULLER_ARMS), subset = factor(subset, FULLER_SUBSETS)) %>% arrange(arm, subset) %>% mutate(across(c(arm, subset), as.character))
+}
+fig_fuller <- function(d) {
+  if (is.null(d)) return(placeholder_plot("Fuller-model CV not found.\nRun: sbatch scripts/slurm/orient_fuller.sbatch"))
+  p <- subset_defs(d) %>% filter(subset %in% FULLER_SUBSETS) %>% part_level(c("arm", "subset")) %>% mutate(subset = factor(subset, FULLER_SUBSETS), arm = lab(arm))
+  ggplot(p, aes(subset, ape, colour = arm)) +
+    geom_point(position = position_jitterdodge(jitter.width = .15, dodge.width = .6), alpha = .5, size = 1.4) +
+    stat_summary(aes(group = arm), fun = mean, geom = "crossbar", width = .5, fatten = 1.2, position = position_dodge(.6), colour = "black") +
+    scale_y_continuous("Absolute percentage error per held-out participant (%)", trans = "sqrt", breaks = c(0, 2, 5, 10, 25, 50, 80)) +
+    scale_colour_manual(values = c("#1b6ca8", "#d1495b")) + labs(x = NULL, colour = NULL) +
+    theme_minimal(base_size = 10) + theme(legend.position = "top", axis.text.x = element_text(angle = 20, hjust = 1))
 }

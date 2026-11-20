@@ -141,7 +141,7 @@ def make_train_arrays(records):
     sig, ys, cs, subj = [], [], [], []
     for r in records:
         x = r["xyz"]
-        if len(x) < SPW:                       # training skips short records, like build_windows
+        if len(x) < SPW and not r.get("allow_short"):   # training skips short records like build_windows (TVS crops set allow_short and are zero-padded)
             continue
         wins = window_signal(x)
         ev = np.asarray(r["events"], dtype=np.int64)
@@ -205,10 +205,14 @@ def score_records(model, records, arm, ranges, device, rot_ids, tag):
         for rid in rot_ids:
             wins = window_signal(rotate(r["xyz"], ALL_ROTS[rid]))
             for mode in eval_modes(arm):
+                if r.get("mask") is not None:       # TVS: count only inside the reference walking bouts; mass_all = whole recording
+                    p = window_probs(model, wins, arm, vmins, vmaxs, device, mode).reshape(-1)[:len(r["xyz"])]
+                    mass, mass_all = float((p * r["mask"]).sum() / LABEL_WIDTH), float(p.sum() / LABEL_WIDTH)
+                else:
+                    mass = count_windows(model, wins, arm, vmins, vmaxs, device, len(r["xyz"]), mode); mass_all = mass
                 rows.append(dict(**tag, arm=arm, mode=mode, rot=int(rid), cohort=r.get("cohort", ""),
                                  subject=r["subject"], activity=r["condition"], duration_s=len(r["xyz"]) / FS,
-                                 true=len(r["events"]),
-                                 mass=count_windows(model, wins, arm, vmins, vmaxs, device, len(r["xyz"]), mode)))
+                                 true=len(r["events"]), mass=mass, mass_all=mass_all))
     return rows
 
 

@@ -9,6 +9,7 @@ Protocols (--protocol, may list several):
   full  train once on all three cohorts and save the model (for analysis/orient_external.py, which scores the
         Mobilise-D right-wrist person under all rotations).
 
+  python scripts/orient_cv.py --device cuda:0 --protocol cv full --arms xyz_place8 xyz_place16 --cohorts clemson oxwalk marea tvs --tag orient_fuller --rot_eval 0
   python scripts/orient_cv.py --device cuda:0 --protocol cv loco full --arms xyz xyz_rot vm xyz_vm_drop xyz_vm_rot
   python scripts/orient_cv.py ... --epochs 1 --only_split fold0    # smoke test
   python scripts/orient_cv.py --protocol cv loco --arms xyz --mirror_only    # add the mirror scores to finished runs
@@ -30,25 +31,40 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _fit_common as fc  # noqa: E402
-from cv_with_marea import load_all, make_folds  # noqa: E402  (same loaders/folds as the CV)
+from cv_with_marea import load_all  # noqa: E402  (same loaders as the CV)
+from tvs_records import load_tvs_records, train_view  # noqa: E402
 from step_counting.clemson.code.losses import AdaptiveHybridLoss  # noqa: E402
 from step_counting.clemson.code.model import StepSeqNet  # noqa: E402
 from step_counting.clemson.code.train_utils import encode_subject_ids, set_deterministic  # noqa: E402
 from step_counting.orient_model import (ARMS, FS, H, SPW, OrientDataset, fit_ranges, make_train_arrays,  # noqa: E402
                                         n_channels, save_run_config, score_records)
 
-OUT_DIR = ROOT / "analysis" / "cache" / "orient"
-COHORTS = ("clemson", "oxwalk", "marea")
+ALL_COHORTS = ("clemson", "oxwalk", "marea", "tvs")
+
+
+def make_folds(records, k, seed, cohorts):
+    """Participants shuffled within each cohort (in this order) and dealt round-robin into k folds. With the first three cohorts this is
+    identical to scripts/cv_with_marea.py's folds; tvs is appended last so it does not change them."""
+    rng = np.random.RandomState(seed)
+    fold_of = {}
+    for cohort in cohorts:
+        subs = sorted({r["subject"] for r in records if r["cohort"] == cohort})
+        rng.shuffle(subs)
+        for i, sub in enumerate(subs):
+            fold_of[sub] = i % k
+    return fold_of
 
 
 def run_split(protocol, split, arm, train, test, a, device):
-    out = ROOT / "runs" / "orient" / protocol / arm / split
-    csv = OUT_DIR / f"{protocol}_{arm}_{split}{'__mirror' if a.mirror_only else ''}.csv"
+    out_dir = ROOT / "analysis" / "cache" / a.tag
+    out = ROOT / "runs" / a.tag / protocol / arm / split
+    csv = out_dir / f"{protocol}_{arm}_{split}{'__mirror' if a.mirror_only else ''}.csv"
     if test and csv.exists():
         print(f"skip {protocol}/{arm}/{split} (scored)")
         return
     out.mkdir(parents=True, exist_ok=True)
     set_deterministic(a.seed)
+    train = [train_view(r) for r in train]      # TVS: crop to walking bouts, allow short records; no-op for other cohorts
     ranges = fit_ranges(train)
     save_run_config(out, arm, ranges)
     fc.save_config(out, dict(protocol=protocol, split=split, arm=arm, epochs=a.epochs, seed=a.seed, ranges=ranges,
@@ -68,7 +84,7 @@ def run_split(protocol, split, arm, train, test, a, device):
     rot_ids = (list(range(24, 48)) if a.mirror_only else list(range(48 if a.mirror else 24)) if a.rot_eval == "all"
                else [int(i) for i in a.rot_eval.split(",")])
     rows = score_records(model, test, arm, ranges, device, rot_ids, dict(protocol=protocol, split=split))
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_csv(csv, index=False)
     print(f"== scored {protocol}/{arm}/{split}: {len(rows)} rows", flush=True)
 
@@ -88,17 +104,24 @@ def main():
                         "training is skipped when the model is already saved")
     p.add_argument("--num_workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--cohorts", nargs="+", default=["clemson", "oxwalk", "marea"], choices=list(ALL_COHORTS),
+                   help="cohorts to pool; add tvs for the 'fuller' model (Clemson + OxWalk + MAREA + Mobilise-D TVS)")
+    p.add_argument("--tag", default="orient", help="output namespace: runs/<tag>/... and analysis/cache/<tag>/ (use orient_fuller with --cohorts ... tvs)")
     a = p.parse_args()
     device = torch.device(a.device)
     records = load_all()
-    fold_of = make_folds(records, a.folds, a.seed)
+    if "tvs" in a.cohorts:
+        records = records + load_tvs_records()
+    records = [r for r in records if r["cohort"] in a.cohorts]
+    fold_of = make_folds(records, a.folds, a.seed, [c for c in ALL_COHORTS if c in a.cohorts])
+    cohorts = [c for c in ALL_COHORTS if c in a.cohorts]
 
     for protocol in a.protocol:
         if protocol == "cv":
             splits = {f"fold{k}": ([r for r in records if fold_of[r["subject"]] != k],
                                    [r for r in records if fold_of[r["subject"]] == k]) for k in range(a.folds)}
         elif protocol == "loco":
-            splits = {c: ([r for r in records if r["cohort"] != c], [r for r in records if r["cohort"] == c]) for c in COHORTS}
+            splits = {c: ([r for r in records if r["cohort"] != c], [r for r in records if r["cohort"] == c]) for c in cohorts}
         else:
             splits = {"full": (records, [])}
         for split, (train, test) in splits.items():

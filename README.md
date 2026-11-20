@@ -200,3 +200,9 @@ figure and inline number from the cached results in `analysis/cache`; anything n
 Rscript -e 'targets::tar_make()'        # builds paper.pdf (Typst); re-run after copying new results into analysis/cache
 ```
 Cluster side: `bash scripts/slurm/run_orient_pipeline.sh` queues the final fits, the TVS scoring, the CV and the leave-one-cohort-out runs.
+
+## Fuller models (place8 / place16 trained on all four cohorts)
+`scripts/slurm/orient_fuller.sbatch` trains `xyz_place8` and `xyz_place16` on Clemson + OxWalk + MAREA + Mobilise-D TVS (TVS cropped to its walking bouts) and runs
+5-fold participant-level CV over the four cohorts (`scripts/orient_cv.py --cohorts clemson oxwalk marea tvs --tag orient_fuller`). `python analysis/cohort_protocols.py`
+writes the cohort comparison (table + `analysis/cohort_protocols.png`). `python tests/check_fuller_records.py` checks the TVS records, folds and bout-restricted scoring without any network.
+TVS counts are taken inside INDIP walking bouts padded by 0.5 s (the bout boundaries sit on the first/last step).

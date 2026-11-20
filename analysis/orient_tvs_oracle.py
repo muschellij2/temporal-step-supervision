@@ -26,10 +26,13 @@ from step_counting.orient_model import LABEL_WIDTH, OrientPredictor  # noqa: E40
 TVS, OUT = ROOT / "data/mobilised_tvs", ROOT / "analysis/cache"
 
 
-def inside(t, spans):
+PAD_S = 0.5   # INDIP bout Start/End sit on the first/last step; pad so that step's whole probability pulse is counted
+
+
+def inside(t, spans, pad=PAD_S):
     m = np.zeros(len(t), bool)
     for a, b in spans:
-        m |= (t >= a) & (t <= b)
+        m |= (t >= a - pad) & (t <= b + pad)
     return m
 
 

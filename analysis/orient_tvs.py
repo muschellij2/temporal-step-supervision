@@ -8,7 +8,7 @@ xyz_vm_rot, xyz_vm_mirror in step_counting/orient_model.py), and this script mea
 Models: the earlier final models (clemson, combined, all3, oxwalk; step_counting/inference.py) and every orientation arm
 found in runs/orient/full/<arm>/full (train with scripts/orient_cv.py --protocol full).
 Reference: INDIP initial contacts (= steps) inside INDIP's continuous walking bouts, last trial of each test only.
-Model count: Sum(prob)/label_width over the samples INSIDE those bouts ("bout") and over the whole recording ("all";
+Model count: Sum(prob)/label_width over the samples INSIDE those bouts padded by 0.5 s ("bout") and over the whole recording ("all";
 includes standing/turning, so it over-counts relative to the reference, mostly in Test11).
 Per participant: sum over their recordings; headline = mean over participants of |model-ref|/ref (MAPE) and signed (MPE),
 split by wrist side (98 left / 6 right participants) and cohort. Writes analysis/cache/orient_tvs_{recordings,participants}.csv.
@@ -29,10 +29,13 @@ TVS = ROOT / "data/mobilised_tvs"
 OUT = ROOT / "analysis/cache"
 
 
-def inside(t, spans):
+PAD_S = 0.5   # INDIP bout Start/End sit on the first/last step; without padding half of that step's probability pulse is cut off
+
+
+def inside(t, spans, pad=PAD_S):
     m = np.zeros(len(t), bool)
     for a, b in spans:
-        m |= (t >= a) & (t <= b)
+        m |= (t >= a - pad) & (t <= b + pad)
     return m
 
 
