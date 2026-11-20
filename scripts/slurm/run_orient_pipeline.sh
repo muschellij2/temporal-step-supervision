@@ -21,7 +21,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 GRES="${GRES:-gpu:tesh100:1}"                  # smoke-tested type; l40s/tesa100 also work (CC >= 8.0)
 PART="${PART:-bstgpu2,gpu}"                    # H100 lives in bstgpu2 and gpu; for tesa100 use PART=gpu; l40s: PART=bstgpu3,gpu
 CPUS="${CPUS:-4}"
-MEM="${MEM:-32G}"
+MEM="${MEM:-12G}"
 ARMS_ARRAY="${ARMS_ARRAY:-0,1,5,6,7}"          # xyz xyz_rot xyz_mirror xyz_vm_mirror xyz_vm
 mkdir -p logs
 
@@ -35,7 +35,7 @@ J1=$(run env PROTOCOLS=full "${SB[@]}" --array="$ARMS_ARRAY" scripts/slurm/orien
 echo "   job $J1"
 
 echo "== stage 2: TVS scoring (after stage 1 succeeds)"
-J2=$(run sbatch --parsable --dependency=afterok:"$J1" --partition="$PART" --gres="$GRES" --cpus-per-task=2 --mem=16G \
+J2=$(run sbatch --parsable --dependency=afterok:"$J1" --partition="$PART" --gres="$GRES" --cpus-per-task=2 --mem=8G \
     --time=03:00:00 --job-name=tss_orient_tvs --output=logs/orient_tvs_%j.out \
     --wrap='source ~/.bash_profile; source scripts/slurm/env.sh; python analysis/orient_tvs.py --device cuda:0')
 echo "   job $J2"

@@ -6,7 +6,7 @@
 #SBATCH --partition=bstgpu,bstgpu2,bstgpu3,gpu          # <-- only GPU workloads belong here
 #SBATCH --gres=gpu:l40s:1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#SBATCH --mem=12G
 #SBATCH --time=08:00:00
 #SBATCH --output=logs/%x_%j.out
 source ~/.bash_profile
