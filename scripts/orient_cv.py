@@ -11,6 +11,7 @@ Protocols (--protocol, may list several):
 
   python scripts/orient_cv.py --device cuda:0 --protocol cv loco full --arms xyz xyz_rot vm xyz_vm_drop xyz_vm_rot
   python scripts/orient_cv.py ... --epochs 1 --only_split fold0    # smoke test
+  python scripts/orient_cv.py --protocol cv loco --arms xyz --mirror_only    # add the mirror scores to finished runs
 
 Outputs: runs/orient/<protocol>/<arm>/<split>/{model.pt,orient_config.json,loss_log.csv}
          analysis/cache/orient/<protocol>_<arm>_<split>.csv   (resumable; cv/loco only)
@@ -42,7 +43,7 @@ COHORTS = ("clemson", "oxwalk", "marea")
 
 def run_split(protocol, split, arm, train, test, a, device):
     out = ROOT / "runs" / "orient" / protocol / arm / split
-    csv = OUT_DIR / f"{protocol}_{arm}_{split}.csv"
+    csv = OUT_DIR / f"{protocol}_{arm}_{split}{'__mirror' if a.mirror_only else ''}.csv"
     if test and csv.exists():
         print(f"skip {protocol}/{arm}/{split} (scored)")
         return
@@ -64,7 +65,8 @@ def run_split(protocol, split, arm, train, test, a, device):
     if not test:
         return
     model.load_state_dict(torch.load(out / "model.pt", map_location=device))
-    rot_ids = list(range(48 if a.mirror else 24)) if a.rot_eval == "all" else [int(i) for i in a.rot_eval.split(",")]
+    rot_ids = (list(range(24, 48)) if a.mirror_only else list(range(48 if a.mirror else 24)) if a.rot_eval == "all"
+               else [int(i) for i in a.rot_eval.split(",")])
     rows = score_records(model, test, arm, ranges, device, rot_ids, dict(protocol=protocol, split=split))
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_csv(csv, index=False)
@@ -81,6 +83,9 @@ def main():
     p.add_argument("--epochs", type=int, default=fc.EPOCHS)
     p.add_argument("--rot_eval", default="all", help="'all' (24 proper rotations) or comma list of ids (0 = identity)")
     p.add_argument("--mirror", action="store_true", help="with --rot_eval all: also score the 24 mirrored (left/right) variants")
+    p.add_argument("--mirror_only", action="store_true",
+                   help="score ONLY the 24 mirrored mappings (ids 24-47) into <protocol>_<arm>_<split>__mirror.csv; existing CSVs untouched, "
+                        "training is skipped when the model is already saved")
     p.add_argument("--num_workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=42)
     a = p.parse_args()

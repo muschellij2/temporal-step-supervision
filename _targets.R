@@ -18,6 +18,7 @@ list(
   tar_target(stamp_manifest, input_stamp("data/mobilised_tvs/manifest.csv"), cue = tar_cue("always")),
   tar_target(stamp_tvs,      input_stamp(file.path(CACHE, c("orient_tvs_participants.csv", "orient_tvs_recordings.csv"))), cue = tar_cue("always")),
   tar_target(stamp_orient,   glob_stamp(file.path(CACHE, "orient"), "\\.csv$"), cue = tar_cue("always")),
+  tar_target(stamp_rot,      glob_stamp(CACHE, "^orient_tvs_rotations_.*\\.csv$"), cue = tar_cue("always")),
 
   # ---- MAREA: original clemson / oxwalk / combined models, as-is
   tar_target(marea,          load_marea(stamp_marea)),
@@ -40,6 +41,15 @@ list(
   tar_target(tab_tvs_wrist,  tab_tvs(tvs, by = c("model", "wrist"))),
   tar_target(fig_tvs_main,   fig_tvs(tvs)),
 
+  # ---- effect of augmentation on TVS (paired) and oracle axis-swap sweep (all 48 signed permutations)
+  tar_target(tab_aug_tvs,    tab_aug_effect(tvs)),
+  tar_target(rot,            load_rotations(stamp_rot)),
+  tar_target(tab_oracle_main, tab_oracle(rot)),
+  tar_target(fig_oracle_main, fig_oracle(rot)),
+  tar_target(tab_tta_tvs_main, tab_tta_tvs(rot)),
+  tar_target(tab_tta_cv,     tab_tta(orient_cv)),
+  tar_target(tab_tta_loco,   tab_tta(orient_loco)),
+
   # ---- orientation / VM / augmentation arms: CV and leave-one-cohort-out, each held-out signal scored under 24 rotations
   tar_target(orient_cv,      load_orient(stamp_orient, "cv")),
   tar_target(orient_loco,    load_orient(stamp_orient, "loco")),
@@ -51,7 +61,8 @@ list(
   # ---- bookkeeping + scalars for inline prose
   tar_target(tab_status_main, tab_status(stamp_marea, stamp_koffman, stamp_cv, stamp_manifest, stamp_tvs,
                                          glob_stamp(file.path(CACHE, "orient"), "^cv_.*\\.csv$"),
-                                         glob_stamp(file.path(CACHE, "orient"), "^loco_.*\\.csv$"))),
+                                         glob_stamp(file.path(CACHE, "orient"), "^loco_.*\\.csv$"),
+                                         glob_stamp(CACHE, "^orient_tvs_rotations_.*\\.csv$"))),
   tar_target(vals, make_vals(marea, tab_marea_main, tab_run_share, tab_cv_main, tab_tvs_description,
                              tab_tvs_models, tab_tvs_wrist, tab_orient_cv, tab_orient_loco)),
 

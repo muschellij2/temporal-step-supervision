@@ -244,10 +244,11 @@ tab_status <- function(...) {
   s <- list(...)
   tibble(
     result = c("MAREA validation of clemson / oxwalk / combined", "Koffman et al. per-participant totals", "Held-out CV with MAREA (all3 recipe)",
-               "Mobilise-D TVS conversion (manifest)", "TVS scoring of all models", "Orientation arms: 5-fold CV", "Orientation arms: leave-one-cohort-out"),
+               "Mobilise-D TVS conversion (manifest)", "TVS scoring of all models", "Orientation arms: 5-fold CV", "Orientation arms: leave-one-cohort-out", "TVS oracle axis-swap sweep (48 mappings)"),
     produced_by = c("python analysis/marea_eval.py", "Rscript analysis/fetch_koffman_marea.R", "scripts/slurm/cv_marea.sbatch",
                     "python scripts/prepare_mobilised_tvs.py", "scripts/slurm/run_orient_pipeline.sh (stage 2)",
-                    "run_orient_pipeline.sh (stage 3)", "run_orient_pipeline.sh (stage 4)"),
+                    "run_orient_pipeline.sh (stage 3)", "run_orient_pipeline.sh (stage 4)",
+                    "scripts/slurm/orient_tvs_oracle.sbatch"),
     files_found = map_int(s, ~ length(.x$files)),
     status = if_else(files_found > 0, "available", "pending"))
 }
@@ -295,4 +296,101 @@ make_vals <- function(marea, tab_m, share, cv, tvs_desc, tvs_t, tvs_side, orient
     v[[paste0("tvs_right_mape_", m)]] <- pick(tvs_side, model == m, wrist == "right", col = "MAPE")
   }
   v
+}
+
+# ---------------------------------------------------------------------------------------------- augmentation effect (paired, TVS)
+tab_aug_effect <- function(p, ref = "orient_xyz", arms = c("orient_xyz_vm", "orient_xyz_rot", "orient_xyz_mirror", "orient_xyz_vm_mirror")) {
+  sk <- tibble(arm = arms, delta_APE = NA_real_, lo = NA_real_, hi = NA_real_, n_better = NA_integer_, n = NA_integer_)
+  if (is.null(p)) return(sk)
+  w <- tvs_part(p) %>% select(model, id, ape) %>% pivot_wider(names_from = model, values_from = ape)
+  map_dfr(arms, function(a) {
+    if (!a %in% names(w) || !ref %in% names(w)) return(filter(sk, arm == a))
+    d <- w[[a]] - w[[ref]]; set.seed(1); ci <- boot_mean(d)
+    tibble(arm = a, delta_APE = mean(d), lo = ci[1], hi = ci[2], n_better = sum(d < 0), n = length(d))
+  })
+}
+
+# ---------------------------------------------------------------------------------------------- oracle axis swap (TVS, all 48 signed permutations)
+load_rotations <- function(stamp) {
+  f <- stamp$files
+  if (!length(f)) return(NULL)
+  map_dfr(f, read_csv, show_col_types = FALSE)
+}
+rot_part <- function(r) {   # participant-level APE for each (model, rot)
+  r %>% mutate(subject = id, mass = bout) %>% part_level(c("model", "rot", "wrist", "mapping")) 
+}
+.mape_by_rot <- function(pp, rots) pp %>% filter(rot %in% rots) %>% group_by(rot) %>% summarise(M = mean(ape), .groups = "drop")
+.best_rot <- function(pp, rots) { m <- .mape_by_rot(pp, rots); m$rot[which.min(m$M)] }
+
+tab_oracle <- function(r, k = 5, seed = 1) {
+  cols <- c("model", "as_recorded", "typical_24", "best_global_24", "best_global_24_rot", "best_global_24_map",
+            "cv_selected_24", "best_per_wrist_24", "best_per_participant_24", "best_global_48", "best_global_48_rot")
+  if (is.null(r)) return(tibble(model = c("all3", "orient_xyz", "orient_xyz_vm", "orient_xyz_vm_mirror")) %>%
+                           mutate(!!!setNames(rep(list(NA_real_), length(cols) - 1), cols[-1])))
+  pp <- rot_part(r)
+  maps <- r %>% distinct(rot, mapping)
+  out <- map_dfr(unique(pp$model), function(m) {
+    q <- filter(pp, model == m); ids <- unique(q$subject)
+    mr24 <- .mape_by_rot(q, 0:23); mr48 <- .mape_by_rot(q, 0:47)
+    b24 <- mr24$rot[which.min(mr24$M)]; b48 <- mr48$rot[which.min(mr48$M)]
+    # honest version: choose the rotation on the other folds of participants, score the held-out fold
+    set.seed(seed); fold <- setNames(sample(rep_len(seq_len(k), length(ids))), ids)
+    cv <- map_dbl(seq_len(k), function(f) {
+      tr <- q %>% filter(fold[as.character(subject)] != f); te <- q %>% filter(fold[as.character(subject)] == f, rot == .best_rot(tr, 0:23))
+      sum(te$ape)
+    })
+    # oracle per wrist side and per participant (increasingly optimistic)
+    pw <- map_dbl(unique(q$wrist), function(w) { qq <- filter(q, wrist == w); sum(filter(qq, rot == .best_rot(qq, 0:23))$ape) })
+    bp <- q %>% filter(rot < 24) %>% group_by(subject) %>% summarise(a = min(ape), .groups = "drop")
+    tibble(model = m, as_recorded = mean(q$ape[q$rot == 0]), typical_24 = mean(mr24$M), best_global_24 = min(mr24$M),
+           best_global_24_rot = b24, best_global_24_map = maps$mapping[maps$rot == b24],
+           cv_selected_24 = sum(cv) / length(ids), best_per_wrist_24 = sum(pw) / length(ids), best_per_participant_24 = mean(bp$a),
+           best_global_48 = min(mr48$M), best_global_48_rot = b48)
+  })
+  out %>% mutate(model = factor(model, TVS_MODELS)) %>% arrange(model) %>% mutate(model = as.character(model))
+}
+fig_oracle <- function(r) {
+  if (is.null(r)) return(placeholder_plot("TVS axis-swap sweep not found.\nRun: sbatch scripts/slurm/orient_tvs_oracle.sbatch"))
+  m <- rot_part(r) %>% group_by(model, rot) %>% summarise(MAPE = mean(ape), .groups = "drop") %>% mutate(model = lab(model), mirrored = rot >= 24)
+  best <- m %>% filter(rot < 24) %>% group_by(model) %>% slice_min(MAPE, n = 1)
+  ggplot(m, aes(rot, MAPE, colour = model)) +
+    geom_vline(xintercept = 23.5, colour = "grey75", linetype = 2) +
+    geom_line(linewidth = .5, alpha = .7) + geom_point(aes(shape = mirrored), size = 1.6) +
+    geom_point(data = best, shape = 8, size = 3.2, stroke = .8, show.legend = FALSE) +
+    labs(x = "axis mapping applied to the TVS signal (0 = as recorded; 24+ = mirrored); * = best of the 24 proper rotations",
+         y = "MAPE per participant (%)", colour = NULL, shape = "mirrored") +
+    theme_minimal(base_size = 10) + theme(legend.position = "top")
+}
+
+# ---------------------------------------------------------------------------------------------- test-time ensemble over rotations
+# For every held-out recording the model has been run on the signal rotated by each of the 24 proper (and, if scored, 24 mirrored)
+# axis mappings. Ensemble variants use NO labels:
+#   as_recorded  one pass on the signal as recorded      mean24  mean of the 24 counts (= count of the averaged step probability)
+#   median24     median of the 24 counts                 max24   largest of the 24 counts (label-free; models undercount when axes are wrong)
+#   mean48       mean over the 24 + 24 mirrored counts (only where the mirrored scores exist)
+# Averaging over the whole group makes the output invariant to the recording's orientation (the set of rotated copies is the same).
+TTA_VARIANTS <- c("as_recorded", "mean24", "median24", "max24", "mean48")
+tta_records <- function(d) {   # d: one row per (record, rot) with columns arm, split, cohort, subject, activity, true, rot, mass
+  d %>% group_by(across(all_of(c("split", "arm", "cohort", "subject", "activity", "true")))) %>%
+    summarise(as_recorded = mass[rot == 0][1], mean24 = mean(mass[rot < 24]), median24 = median(mass[rot < 24]), max24 = max(mass[rot < 24]),
+              mean48 = if (any(rot >= 24)) mean(mass) else NA_real_, .groups = "drop") %>%
+    pivot_longer(all_of(TTA_VARIANTS), names_to = "variant", values_to = "mass") %>% filter(!is.na(mass))
+}
+tab_tta <- function(d, arms = c("xyz", "xyz_vm", "xyz_rot", "xyz_mirror", "xyz_vm_mirror")) {
+  sk <- expand_grid(arm = arms, subset = SUBSETS, variant = TTA_VARIANTS) %>%
+    mutate(n = NA_integer_, MAPE = NA_real_, SD = NA_real_, MAPE_lo = NA_real_, MAPE_hi = NA_real_, MPE = NA_real_, bias_steps = NA_real_)
+  if (is.null(d)) return(sk)
+  subset_defs(tta_records(d)) %>% part_level(c("arm", "subset", "variant")) %>% summ_metric(c("arm", "subset", "variant")) %>%
+    mutate(arm = factor(arm, unique(c(arms, arm))), subset = factor(subset, SUBSETS), variant = factor(variant, TTA_VARIANTS)) %>%
+    arrange(arm, subset, variant) %>% mutate(across(c(arm, subset, variant), as.character))
+}
+tab_tta_tvs <- function(r) {   # r: TVS sweep (model, rot, id, wrist, true, bout)
+  if (is.null(r)) return(tibble(model = TVS_MODELS, variant = NA_character_, MAPE = NA_real_, MPE = NA_real_))
+  v <- r %>% group_by(model, cohort, id, wrist, test, trial, true) %>%
+    summarise(as_recorded = bout[rot == 0][1], mean24 = mean(bout[rot < 24]), median24 = median(bout[rot < 24]), max24 = max(bout[rot < 24]),
+              mean48 = if (any(rot >= 24)) mean(bout) else NA_real_, .groups = "drop") %>%
+    pivot_longer(all_of(TTA_VARIANTS), names_to = "variant", values_to = "mass") %>% filter(!is.na(mass)) %>% mutate(subject = id)
+  v %>% part_level(c("model", "variant")) %>% summ_metric(c("model", "variant")) %>%
+    mutate(model = factor(model, TVS_MODELS), variant = factor(variant, TTA_VARIANTS)) %>% arrange(model, variant) %>%
+    mutate(across(c(model, variant), as.character))
 }
