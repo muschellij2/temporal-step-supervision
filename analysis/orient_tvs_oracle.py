@@ -7,7 +7,7 @@ analysis in R/functions.R (tab_oracle) also reports a participant-level cross-va
     python analysis/orient_tvs_oracle.py --device cuda:0 --models all3 orient_xyz orient_xyz_vm orient_xyz_vm_mirror   (default: all 9 TVS models)
     python analysis/orient_tvs_oracle.py --device cpu --models all3 --limit 3 --rot_ids 0 5      # smoke test
 
-Writes analysis/cache/orient_tvs_rotations_<model>.csv (skipped if present). Models: the 4 final fits (all3 ...) or
+Writes analysis/cache/orient_tvs_rotations_<model>.csv (skipped if present; a --limit smoke run writes <model>.smoke.csv, which the R pipeline ignores). Models: the 4 final fits (all3 ...) or
 orient_<arm> trained by scripts/orient_cv.py --protocol full. Count = Sum(prob)/label_width inside INDIP walking bouts, like analysis/orient_tvs.py.
 """
 import argparse
@@ -52,7 +52,7 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
 
     for name in a.models:
-        out = OUT / f"orient_tvs_rotations_{name}.csv"
+        out = OUT / f"orient_tvs_rotations_{name}{'.smoke' if a.limit else ''}.csv"   # smoke runs never collide with the real file
         if out.exists() and not a.force:
             print("skip", name, "(exists)"); continue
         if name in MODEL_SPECS:
