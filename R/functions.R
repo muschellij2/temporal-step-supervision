@@ -215,7 +215,7 @@ load_orient <- function(stamp, protocol) {
   map_dfr(f, read_csv, show_col_types = FALSE) %>% filter(mode %in% c("full", "vm_only")) %>%
     mutate(arm = if_else(mode == "vm_only", paste0(arm, "/vm_only"), arm)) %>% add_pe()
 }
-tab_orient <- function(d, arms = c("xyz", "xyz_vm", "xyz_mirror", "xyz_vm_mirror")) {
+tab_orient <- function(d, arms = c("xyz", "xyz_vm", "xyz_mirror", "xyz_vm_mirror", "xyz_place8", "xyz_place16")) {
   sk <- expand_grid(arm = arms, subset = SUBSETS) %>%
     mutate(as_recorded = NA_real_, mean_24rot = NA_real_, worst_24rot = NA_real_, mean_mirror = NA_real_)
   if (is.null(d)) return(sk)
@@ -430,7 +430,7 @@ tab_subset_tvs <- function(r) {
     mutate(across(c(model, subset), as.character)) %>% select(model, subset, as_recorded, top3, max, best_single, best_rot)
 }
 
-tab_subset_cv <- function(d, arms = c("xyz", "xyz_vm", "xyz_mirror", "xyz_vm_mirror")) {
+tab_subset_cv <- function(d, arms = c("xyz", "xyz_vm", "xyz_mirror", "xyz_vm_mirror", "xyz_place8", "xyz_place16")) {
   sk <- expand_grid(arm = arms, subset = c("All cohorts", "OxWalk wrist", "MAREA running"), rot_set = names(SUBSET_LAB)) %>%
     mutate(as_recorded = NA_real_, mean = NA_real_, top3 = NA_real_, max = NA_real_)
   if (is.null(d)) return(sk)
