@@ -206,3 +206,22 @@ Cluster side: `bash scripts/slurm/run_orient_pipeline.sh` queues the final fits,
 5-fold participant-level CV over the four cohorts (`scripts/orient_cv.py --cohorts clemson oxwalk marea tvs --tag orient_fuller`). `python analysis/cohort_protocols.py`
 writes the cohort comparison (table + `analysis/cohort_protocols.png`). `python tests/check_fuller_records.py` checks the TVS records, folds and bout-restricted scoring without any network.
 TVS counts are taken inside INDIP walking bouts padded by 0.5 s (the bout boundaries sit on the first/last step).
+
+## Released original weights vs our models (MAREA, TVS, Mobi-G)
+The original authors released their per-fold CV models (`runs/temporal-step-supervision-main-weights.zip`: 15 Clemson
+leave-two-out folds, 10 OxWalk folds; no all-data model). `scripts/prepare_released_weights.py` stages them into
+`runs/released/<dataset>/fold_XX` (OxWalk raster ranges were not saved and are parsed from its `training.log`).
+`step_counting/inference.py` exposes them as `released_<dataset>_fXX` (one fold) and `released_<dataset>` (mean of
+the fold probabilities; `make_counter(name)` returns either).
+
+**Mobi-G** (Lanoie, Cheung & Nguyen, Borealis doi:10.5683/SP4/BL2YTA, CC-BY 4.0) is an **external validation set
+only, never used for training**: 70 older adults, ankle-worn Movesense (~52 Hz, m/s^2), protocol + naturalistic
+activities. Step labels are ~1 s intervals that most likely mark the instrumented foot only, so counts are scored
+against both 1x and 2x the labelled intervals. All models are wrist-trained, so this is a placement + population shift.
+```bash
+python scripts/prepare_released_weights.py
+python -I scripts/prepare_mobig.py                          # download + split at gaps + 50 Hz grid -> data/mobig/
+python tests/check_released_parity.py                       # released folds re-score their own held-out subjects
+bash scripts/slurm/submit_gpu.sh scripts/slurm/released_eval.sbatch   # parity, MAREA, TVS, Mobi-G (4 array tasks)
+```
+Outputs (analysis/cache): `released_parity.csv`, `marea_counts_released.csv`, `orient_tvs_*_released.csv`, `mobig_counts.csv`, `mobig_participants.csv`.

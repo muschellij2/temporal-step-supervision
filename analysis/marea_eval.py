@@ -2,6 +2,7 @@
 
     python analysis/marea_eval.py            # computes anything missing in analysis/cache/
     python analysis/marea_eval.py --force
+    python analysis/marea_eval.py --only marea --models released_clemson released_oxwalk --tag _released
 
 Caches (analysis/cache/, gitignored because derived from non-redistributable data):
   marea_counts.csv      per model x recording: true steps, mass count, switch count, event F1, ...
@@ -56,17 +57,19 @@ def peak_prob_at_steps(prob, fs, true_t, half_s=0.15):
     return float(np.mean(out)) if out else np.nan
 
 
-def run_marea(force=False):
-    from step_counting.inference import StepCounter
+def run_marea(force=False, models=MODELS, tag=""):
+    """Ensemble names (released_clemson / released_oxwalk) add one mass-only row per fold model (released_<ds>_fXX)."""
+    from step_counting.inference import make_counter
 
-    f_counts, f_probs = CACHE / "marea_counts.csv", CACHE / "marea_probs.npz"
+    f_counts, f_probs = CACHE / f"marea_counts{tag}.csv", CACHE / f"marea_probs{tag}.npz"
     if f_counts.exists() and f_probs.exists() and not force:
         return
     man = pd.read_csv(ROOT / "data/marea/manifest.csv")
     ev = pd.read_csv(ROOT / "data/marea/events.csv")
     rows, probs = [], {}
-    for name in MODELS:
-        sc = StepCounter(name)
+    for name in models:
+        sc = make_counter(name)
+        lw = sc.spec["label_width"]
         for r in man.itertuples():
             res = sc.predict_csv(ROOT / "data/marea" / r.file, fs=r.fs)
             true_t = ev[(ev.subject == r.subject) & (ev.activity == r.activity)].time_s.to_numpy()
@@ -78,6 +81,9 @@ def run_marea(force=False):
                              peak_prob=peak_prob_at_steps(res.prob, res.model_fs, true_t),
                              model_fs=res.model_fs))
             probs[f"{name}|{r.activity}|{r.subject}"] = res.prob.astype(np.float32)
+            for mname, p in (res.member_probs or {}).items():
+                rows.append(dict(model=mname, subject=r.subject, activity=r.activity, group=r.group,
+                                 duration_s=r.duration_s, true=r.n_steps, mass=float(p.sum() / lw), model_fs=res.model_fs))
             print(name, r.activity, r.subject, round(res.step_count), r.n_steps, flush=True)
     CACHE.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_csv(f_counts, index=False)
@@ -205,11 +211,13 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--only", choices=["marea", "insample", "dist", "cf"])
+    ap.add_argument("--models", nargs="+", default=MODELS, help="MAREA scoring only; e.g. released_clemson released_oxwalk")
+    ap.add_argument("--tag", default="", help="MAREA scoring only: suffix for marea_counts/marea_probs (e.g. _released)")
     a = ap.parse_args()
     if a.only in (None, "dist"):
         run_distributions(a.force)
     if a.only in (None, "marea"):
-        run_marea(a.force)
+        run_marea(a.force, a.models, a.tag)
     if a.only in (None, "cf"):
         run_counterfactual(a.force)
     if a.only in (None, "insample"):

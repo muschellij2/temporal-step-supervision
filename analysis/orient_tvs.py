@@ -4,6 +4,7 @@ chosen at test time. Rotation/mirror robustness has to come from TRAINING-time a
 xyz_vm_rot, xyz_vm_mirror in step_counting/orient_model.py), and this script measures whether it did.
 
     python analysis/orient_tvs.py [--device cuda:0] [--tests 4 5 6 7 8 9 10 11] [--limit 3]
+    python analysis/orient_tvs.py --models released_clemson released_oxwalk clemson combined --tag _released
 
 Models: the earlier final models (clemson, combined, all3, oxwalk; step_counting/inference.py) and every orientation arm
 found in runs/orient/full/<arm>/full (train with scripts/orient_cv.py --protocol full).
@@ -22,7 +23,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from step_counting.inference import MODEL_SPECS, StepCounter  # noqa: E402
+from step_counting.inference import ALL_SPECS, ENSEMBLES, MODEL_SPECS, make_counter  # noqa: E402
 from step_counting.orient_model import ARMS, LABEL_WIDTH, OrientPredictor  # noqa: E402
 
 TVS = ROOT / "data/mobilised_tvs"
@@ -40,6 +41,16 @@ def inside(t, spans, pad=PAD_S):
 
 
 def models(a):
+    if a.models:   # explicit list: standard/released names, ensembles, or orient_<arm>
+        out = {}
+        for name in a.models:
+            if name in ALL_SPECS or name in ENSEMBLES:
+                out[name] = ("std", name)
+            elif name.startswith("orient_") and name[7:] in ARMS:
+                out[name] = ("orient", name[7:])
+            else:
+                raise SystemExit(f"unknown model {name}")
+        return out
     out = {}
     for name in MODEL_SPECS:
         if (ROOT / "runs" / MODEL_SPECS[name]["run"] / "model.pt").exists():
@@ -55,6 +66,9 @@ def main():
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--tests", nargs="+", type=int, default=list(range(4, 12)))
     ap.add_argument("--limit", type=int, default=None, help="only the first N participants (smoke test)")
+    ap.add_argument("--models", nargs="+", default=None,
+                    help="default: all final + orient models found; e.g. released_clemson released_oxwalk (fold rows added)")
+    ap.add_argument("--tag", default="", help="suffix for the output file names (e.g. _released)")
     a = ap.parse_args()
 
     man = pd.read_csv(TVS / "manifest.csv")
@@ -68,7 +82,7 @@ def main():
     rows = []
     for name, (kind, key) in mods.items():
         if kind == "std":
-            net = StepCounter(key, device=a.device)
+            net = make_counter(key, device=a.device)
         else:
             net = OrientPredictor(ROOT / "runs/orient/full" / key / "full", device=a.device)
         for r in man.itertuples():
@@ -77,23 +91,27 @@ def main():
             b = bouts[(bouts.id == r.id) & (bouts.test == r.test) & (bouts.trial == r.trial) &
                       (bouts.wrist == r.wrist.capitalize() + "Wrist")]
             spans = list(zip(b.start_s, b.end_s))
+            members = {}
             if kind == "std":
                 res = net.predict(xyz, r.fs)
                 p, t, lw = res.prob, res.prob_times_s, net.spec["label_width"]
+                members = res.member_probs or {}
             else:
                 p = net.predict_prob(xyz, r.fs); t = np.arange(len(p)) / 15; lw = LABEL_WIDTH
-            rows.append(dict(model=name, cohort=r.cohort, id=r.id, test=r.test, trial=r.trial, wrist=r.wrist, true=r.n_steps,
-                             bout=float(p[inside(t, spans)].sum() / lw), all=float(p.sum() / lw)))
+            m = inside(t, spans)
+            for mname, mp in [(name, p), *members.items()]:
+                rows.append(dict(model=mname, cohort=r.cohort, id=r.id, test=r.test, trial=r.trial, wrist=r.wrist,
+                                 true=r.n_steps, bout=float(mp[m].sum() / lw), all=float(mp.sum() / lw)))
         print("done", name, flush=True)
 
     rec = pd.DataFrame(rows)
     OUT.mkdir(parents=True, exist_ok=True)
-    rec.to_csv(OUT / "orient_tvs_recordings.csv", index=False)
+    rec.to_csv(OUT / f"orient_tvs_recordings{a.tag}.csv", index=False)
     part = rec.groupby(["model", "cohort", "id", "wrist"], as_index=False)[["true", "bout", "all"]].sum()
     for k in ("bout", "all"):
         part[f"mpe_{k}"] = 100 * (part[k] - part.true) / part.true
         part[f"ape_{k}"] = part[f"mpe_{k}"].abs()
-    part.to_csv(OUT / "orient_tvs_participants.csv", index=False)
+    part.to_csv(OUT / f"orient_tvs_participants{a.tag}.csv", index=False)
 
     def summ(g):
         return pd.Series(dict(n=g.id.nunique(), MAPE_bout=g.ape_bout.mean(), MPE_bout=g.mpe_bout.mean(),
